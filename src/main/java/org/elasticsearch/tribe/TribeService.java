@@ -49,6 +49,7 @@ import org.elasticsearch.node.NodeBuilder;
 import org.elasticsearch.node.internal.InternalNode;
 import org.elasticsearch.rest.RestStatus;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -74,8 +75,8 @@ import java.util.concurrent.CountDownLatch;
  */
 public class TribeService extends AbstractLifecycleComponent<TribeService> {
 
-    public static final ClusterBlock TRIBE_METADATA_BLOCK = new ClusterBlock(10, "tribe node, metadata not allowed", false, false, RestStatus.BAD_REQUEST, ClusterBlockLevel.METADATA);
-    public static final ClusterBlock TRIBE_WRITE_BLOCK = new ClusterBlock(11, "tribe node, write not allowed", false, false, RestStatus.BAD_REQUEST, ClusterBlockLevel.WRITE);
+    public static final ClusterBlock TRIBE_METADATA_BLOCK = new ClusterBlock(10, "tribe node, metadata not allowed", false, false, RestStatus.BAD_REQUEST, EnumSet.of(ClusterBlockLevel.METADATA));
+    public static final ClusterBlock TRIBE_WRITE_BLOCK = new ClusterBlock(11, "tribe node, write not allowed", false, false, RestStatus.BAD_REQUEST, EnumSet.of(ClusterBlockLevel.WRITE));
 
     public static Settings processSettings(Settings settings) {
         if (settings.get(TRIBE_NAME) != null) {
@@ -166,36 +167,6 @@ public class TribeService extends AbstractLifecycleComponent<TribeService> {
 
     @Override
     protected void doStart() throws ElasticsearchException {
-        final CountDownLatch latch = new CountDownLatch(1);
-        clusterService.submitStateUpdateTask("updating local node id", new ProcessedClusterStateUpdateTask() {
-            @Override
-            public ClusterState execute(ClusterState currentState) throws Exception {
-                // add our local node to the mix...
-                return ClusterState.builder(currentState)
-                        .nodes(DiscoveryNodes.builder(currentState.nodes()).put(clusterService.localNode()).localNodeId(clusterService.localNode().id()))
-                        .build();
-            }
-
-            @Override
-            public void onFailure(String source, Throwable t) {
-                try {
-                    logger.error("{}", t, source);
-                } finally {
-                    latch.countDown();
-                }
-            }
-
-            @Override
-            public void clusterStateProcessed(String source, ClusterState oldState, ClusterState newState) {
-                latch.countDown();
-            }
-        });
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new ElasticsearchIllegalStateException("Interrupted while starting [" + this.getClass().getSimpleName() + "]", e);
-        }
         for (InternalNode node : nodes) {
             try {
                 node.start();

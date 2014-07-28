@@ -24,6 +24,7 @@ import com.google.common.collect.ImmutableMap;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.master.TransportMasterNodeOperationAction;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
@@ -54,8 +55,8 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeOperation
     private final TransportNodesSnapshotsStatus transportNodesSnapshotsStatus;
 
     @Inject
-    public TransportSnapshotsStatusAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool, SnapshotsService snapshotsService, TransportNodesSnapshotsStatus transportNodesSnapshotsStatus) {
-        super(settings, transportService, clusterService, threadPool);
+    public TransportSnapshotsStatusAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool, SnapshotsService snapshotsService, TransportNodesSnapshotsStatus transportNodesSnapshotsStatus, ActionFilters actionFilters) {
+        super(settings, SnapshotsStatusAction.NAME, transportService, clusterService, threadPool, actionFilters);
         this.snapshotsService = snapshotsService;
         this.transportNodesSnapshotsStatus = transportNodesSnapshotsStatus;
     }
@@ -63,11 +64,6 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeOperation
     @Override
     protected String executor() {
         return ThreadPool.Names.GENERIC;
-    }
-
-    @Override
-    protected String transportAction() {
-        return SnapshotsStatusAction.NAME;
     }
 
     @Override
@@ -111,9 +107,13 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeOperation
                     snapshotIds, request.masterNodeTimeout(), new ActionListener<TransportNodesSnapshotsStatus.NodesSnapshotStatus>() {
                 @Override
                 public void onResponse(TransportNodesSnapshotsStatus.NodesSnapshotStatus nodeSnapshotStatuses) {
-                    ImmutableList<SnapshotMetaData.Entry> currentSnapshots =
-                            snapshotsService.currentSnapshots(request.repository(), request.snapshots());
-                    listener.onResponse(buildResponse(request, currentSnapshots, nodeSnapshotStatuses));
+                    try {
+                        ImmutableList<SnapshotMetaData.Entry> currentSnapshots =
+                                snapshotsService.currentSnapshots(request.repository(), request.snapshots());
+                        listener.onResponse(buildResponse(request, currentSnapshots, nodeSnapshotStatuses));
+                    } catch (Throwable e) {
+                        listener.onFailure(e);
+                    }
                 }
 
                 @Override
@@ -169,6 +169,7 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeOperation
                             stage = SnapshotIndexShardStage.FAILURE;
                             break;
                         case INIT:
+                        case WAITING:
                         case STARTED:
                             stage = SnapshotIndexShardStage.STARTED;
                             break;
@@ -206,6 +207,9 @@ public class TransportSnapshotsStatusAction extends TransportMasterNodeOperation
                                 state = SnapshotMetaData.State.FAILED;
                                 break;
                             case SUCCESS:
+                            case PARTIAL:
+                                // Translating both PARTIAL and SUCCESS to SUCCESS for now
+                                // TODO: add the differentiation on the metadata level in the next major release
                                 state = SnapshotMetaData.State.SUCCESS;
                                 break;
                             default:

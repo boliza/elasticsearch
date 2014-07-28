@@ -19,16 +19,20 @@
 
 package org.elasticsearch.search.functionscore;
 
+import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
+import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.action.ActionFuture;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
+import org.elasticsearch.action.search.ShardSearchFailure;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.lucene.search.function.CombineFunction;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.index.query.FilterBuilders;
 import org.elasticsearch.index.query.MatchAllFilterBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.index.query.functionscore.DecayFunctionBuilder;
@@ -38,6 +42,7 @@ import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.joda.time.DateTime;
 import org.junit.Test;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -86,9 +91,8 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
                             jsonBuilder().startObject().field("test", "value").startObject("loc").field("lat", 11 + i).field("lon", 22 + i)
                                     .endObject().endObject()));
         }
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
 
-        indexRandom(true, builders);
+        indexRandom(true, indexBuilders);
 
         // Test Gauss
         List<Float> lonlat = new ArrayList<>();
@@ -173,9 +177,8 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
             indexBuilders.add(client().prepareIndex().setType("type1").setId(Integer.toString(i + 3)).setIndex("test")
                     .setSource(jsonBuilder().startObject().field("test", "value").field("num", 3.0 + i).endObject()));
         }
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
 
-        indexRandom(true, builders);
+        indexRandom(true, indexBuilders);
 
         // Test Gauss
 
@@ -254,9 +257,7 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
                 .setSource(
                         jsonBuilder().startObject().field("test", "value value").startObject("loc").field("lat", 11).field("lon", 20)
                                 .endObject().endObject()));
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
-
-        indexRandom(true, builders);
+        indexRandom(true, false, indexBuilders); // force no dummy docs
 
         // Test Gauss
         List<Float> lonlat = new ArrayList<>();
@@ -271,7 +272,7 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
         SearchResponse sr = response.actionGet();
         SearchHits sh = sr.getHits();
         assertThat(sh.getTotalHits(), equalTo((long) (2)));
-        assertThat(sh.getAt(0).getId(), equalTo("1"));
+        assertThat(sh.getAt(0).getId(), isOneOf("1"));
         assertThat(sh.getAt(1).getId(), equalTo("2"));
 
         // Test Exp
@@ -296,17 +297,13 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
                         .endObject().startObject("loc").field("type", "geo_point").endObject().endObject().endObject().endObject()));
         ensureYellow();
 
-        List<IndexRequestBuilder> indexBuilders = new ArrayList<>();
-        indexBuilders.add(client().prepareIndex()
+        client().prepareIndex()
                 .setType("type1")
                 .setId("1")
                 .setIndex("test")
                 .setSource(
                         jsonBuilder().startObject().field("test", "value").startObject("loc").field("lat", 20).field("lon", 11).endObject()
-                                .endObject()));
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
-
-        indexRandom(true, builders);
+                                .endObject()).setRefresh(true).get();
 
         GeoPoint point = new GeoPoint(20, 11);
         ActionFuture<SearchResponse> response = client().search(
@@ -342,12 +339,8 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
                         .endObject().startObject("num").field("type", "double").endObject().endObject().endObject().endObject()));
         ensureYellow();
 
-        List<IndexRequestBuilder> indexBuilders = new ArrayList<>();
-        indexBuilders.add(client().prepareIndex().setType("type1").setId("1").setIndex("test")
-                .setSource(jsonBuilder().startObject().field("test", "value").field("num", 1.0).endObject()));
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
-
-        indexRandom(true, builders);
+        client().prepareIndex().setType("type1").setId("1").setIndex("test")
+                .setSource(jsonBuilder().startObject().field("test", "value").field("num", 1.0).endObject()).setRefresh(true).get();
 
         // function score should return 0.5 for this function
 
@@ -611,8 +604,7 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
                             jsonBuilder().startObject().field("test", "value").field("date", date).field("num", i).startObject("geo")
                                     .field("lat", lat).field("lon", lon).endObject().endObject()));
         }
-        IndexRequestBuilder[] builders = indexBuilders.toArray(new IndexRequestBuilder[indexBuilders.size()]);
-        indexRandom(true, builders);
+        indexRandom(true, indexBuilders);
         List<Float> lonlat = new ArrayList<>();
         lonlat.add(100f);
         lonlat.add(110f);
@@ -856,4 +848,94 @@ public class DecayFunctionScoreTests extends ElasticsearchIntegrationTest {
         }
     }
 
+    // issue https://github.com/elasticsearch/elasticsearch/issues/6292
+    @Test
+    public void testMissingFunctionThrowsElasticsearchParseException() throws IOException {
+
+        // example from issue https://github.com/elasticsearch/elasticsearch/issues/6292
+        String doc = "{\n" +
+                "  \"text\": \"baseball bats\"\n" +
+                "}\n";
+
+        String query = "{\n" +
+                "    \"function_score\": {\n" +
+                "      \"score_mode\": \"sum\",\n" +
+                "      \"boost_mode\": \"replace\",\n" +
+                "      \"functions\": [\n" +
+                "        {\n" +
+                "          \"filter\": {\n" +
+                "            \"term\": {\n" +
+                "              \"text\": \"baseball\"\n" +
+                "            }\n" +
+                "          }\n" +
+                "        }\n" +
+                "      ]\n" +
+                "    }\n" +
+                "}\n";
+
+        client().prepareIndex("t", "test").setSource(doc).get();
+        refresh();
+        ensureYellow("t");
+        try {
+            client().search(
+                    searchRequest().source(
+                            searchSource().query(query))).actionGet();
+            fail("Should fail with SearchPhaseExecutionException");
+        } catch (SearchPhaseExecutionException failure) {
+            assertTrue(failure.getMessage().contains("SearchParseException"));
+            assertFalse(failure.getMessage().contains("NullPointerException"));
+        }
+
+        query = "{\n" +
+                "    \"function_score\": {\n" +
+                "      \"score_mode\": \"sum\",\n" +
+                "      \"boost_mode\": \"replace\",\n" +
+                "      \"functions\": [\n" +
+                "        {\n" +
+                "          \"filter\": {\n" +
+                "            \"term\": {\n" +
+                "              \"text\": \"baseball\"\n" +
+                "            }\n" +
+                "          },\n" +
+                "          \"boost_factor\": 2\n" +
+                "        },\n" +
+                "        {\n" +
+                "          \"filter\": {\n" +
+                "            \"term\": {\n" +
+                "              \"text\": \"baseball\"\n" +
+                "            }\n" +
+                "          }\n" +
+                "        }\n" +
+                "      ]\n" +
+                "    }\n" +
+                "}";
+
+        try {
+            client().search(
+                    searchRequest().source(
+                            searchSource().query(query))).actionGet();
+            fail("Should fail with SearchPhaseExecutionException");
+        } catch (SearchPhaseExecutionException failure) {
+            assertTrue(failure.getMessage().contains("SearchParseException"));
+            assertFalse(failure.getMessage().contains("NullPointerException"));
+            assertTrue(failure.getMessage().contains("One entry in functions list is missing a function"));
+        }
+
+        // next test java client
+        try {
+            client().prepareSearch("t").setQuery(QueryBuilders.functionScoreQuery(FilterBuilders.matchAllFilter(), null)).get();
+        } catch (ElasticsearchIllegalArgumentException failure) {
+            assertTrue(failure.getMessage().contains("function must not be null"));
+        }
+        try {
+            client().prepareSearch("t").setQuery(QueryBuilders.functionScoreQuery().add(FilterBuilders.matchAllFilter(), null)).get();
+        } catch (ElasticsearchIllegalArgumentException failure) {
+            assertTrue(failure.getMessage().contains("function must not be null"));
+        }
+        try {
+            client().prepareSearch("t").setQuery(QueryBuilders.functionScoreQuery().add(null)).get();
+        } catch (ElasticsearchIllegalArgumentException failure) {
+            assertTrue(failure.getMessage().contains("function must not be null"));
+        }
+    }
 }

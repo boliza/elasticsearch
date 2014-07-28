@@ -39,17 +39,15 @@ import java.util.Collections;
 public class SignificantLongTermsAggregator extends LongTermsAggregator {
 
     public SignificantLongTermsAggregator(String name, AggregatorFactories factories, ValuesSource.Numeric valuesSource, @Nullable ValueFormat format,
-              long estimatedBucketCount, int requiredSize, int shardSize, long minDocCount, long shardMinDocCount,
+              long estimatedBucketCount, BucketCountThresholds bucketCountThresholds,
               AggregationContext aggregationContext, Aggregator parent, SignificantTermsAggregatorFactory termsAggFactory) {
 
-        super(name, factories, valuesSource, format, estimatedBucketCount, null, requiredSize, shardSize, minDocCount, aggregationContext, parent);
+        super(name, factories, valuesSource, format, estimatedBucketCount, null, bucketCountThresholds, aggregationContext, parent, SubAggCollectionMode.DEPTH_FIRST, false);
         this.termsAggFactory = termsAggFactory;
-        this.shardMinDocCount = shardMinDocCount;
     }
 
     protected long numCollectedDocs;
     private final SignificantTermsAggregatorFactory termsAggFactory;
-    protected long shardMinDocCount;
 
     @Override
     public void collect(int doc, long owningBucketOrdinal) throws IOException {
@@ -61,7 +59,7 @@ public class SignificantLongTermsAggregator extends LongTermsAggregator {
     public SignificantLongTerms buildAggregation(long owningBucketOrdinal) {
         assert owningBucketOrdinal == 0;
 
-        final int size = (int) Math.min(bucketOrds.size(), shardSize);
+        final int size = (int) Math.min(bucketOrds.size(), bucketCountThresholds.getShardSize());
 
         long supersetSize = termsAggFactory.prepareBackground(context);
         long subsetSize = numCollectedDocs;
@@ -77,13 +75,12 @@ public class SignificantLongTermsAggregator extends LongTermsAggregator {
             spare.subsetSize = subsetSize;
             spare.supersetDf = termsAggFactory.getBackgroundFrequency(spare.term);
             spare.supersetSize = supersetSize;
-            assert spare.subsetDf <= spare.supersetDf;
             // During shard-local down-selection we use subset/superset stats that are for this shard only
             // Back at the central reducer these properties will be updated with global stats
-            spare.updateScore();
+            spare.updateScore(termsAggFactory.getSignificanceHeuristic());
 
             spare.bucketOrd = i;
-            if (spare.subsetDf >= shardMinDocCount) {
+            if (spare.subsetDf >= bucketCountThresholds.getShardMinDocCount()) {
                 spare = (SignificantLongTerms.Bucket) ordered.insertWithOverflow(spare);
             }
         }
@@ -94,7 +91,7 @@ public class SignificantLongTermsAggregator extends LongTermsAggregator {
             bucket.aggregations = bucketAggregations(bucket.bucketOrd);
             list[i] = bucket;
         }
-        return new SignificantLongTerms(subsetSize, supersetSize, name, formatter, requiredSize, minDocCount, Arrays.asList(list));
+        return new SignificantLongTerms(subsetSize, supersetSize, name, formatter, bucketCountThresholds.getRequiredSize(), bucketCountThresholds.getMinDocCount(), termsAggFactory.getSignificanceHeuristic(), Arrays.asList(list));
     }
 
     @Override
@@ -103,7 +100,7 @@ public class SignificantLongTermsAggregator extends LongTermsAggregator {
         ContextIndexSearcher searcher = context.searchContext().searcher();
         IndexReader topReader = searcher.getIndexReader();
         int supersetSize = topReader.numDocs();
-        return new SignificantLongTerms(0, supersetSize, name, formatter, requiredSize, minDocCount, Collections.<InternalSignificantTerms.Bucket>emptyList());
+        return new SignificantLongTerms(0, supersetSize, name, formatter, bucketCountThresholds.getRequiredSize(), bucketCountThresholds.getMinDocCount(), termsAggFactory.getSignificanceHeuristic(), Collections.<InternalSignificantTerms.Bucket>emptyList());
     }
 
     @Override

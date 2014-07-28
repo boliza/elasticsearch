@@ -99,7 +99,7 @@ searchable at all (as an individual field; it may still be included in
 `analyzed`.
 
 |`doc_values` |Set to `true` to store field values in a column-stride fashion.
-Automatically set to `true` when the fielddata format is `doc_values`.
+Automatically set to `true` when the <<fielddata-formats,`fielddata` format>> is `doc_values`.
 
 |`term_vector` |Possible values are `no`, `yes`, `with_offsets`,
 `with_positions`, `with_positions_offsets`. Defaults to `no`.
@@ -181,7 +181,7 @@ you don't need scoring on a specific field, it is highly recommended to disable
 norms on it. In  particular, this is the case for fields that are used solely
 for filtering or aggregations.
 
-coming[1.2.0]
+added[1.2.0]
 In case you would like to disable norms after the fact, it is possible to do so
 by using the <<indices-put-mapping,PUT mapping API>>. Please however note that
 norms won't be removed instantly, but as your index will receive new insertions
@@ -379,7 +379,7 @@ and `false` respectively.
     "tweet" : {
         "properties" : {
             "hes_my_special_tweet" : {
-                "type" : "boolean",
+                "type" : "boolean"
             }
         }
     }
@@ -429,7 +429,7 @@ all.
     "tweet" : {
         "properties" : {
             "image" : {
-                "type" : "binary",
+                "type" : "binary"
             }
         }
     }
@@ -680,7 +680,7 @@ the parameter. In the following example all values from fields `title` and `abst
     "properties" : {
       "title" : { "type" : "string", "copy_to" : "meta_data" },
       "abstract" : { "type" : "string", "copy_to" : "meta_data" },
-      "meta_data" : { "type" : "string" },
+      "meta_data" : { "type" : "string" }
     }
 }
 --------------------------------------------------
@@ -692,7 +692,7 @@ Multiple fields are also supported:
 {
   "book" : {
     "properties" : {
-      "title" : { "type" : "string", "copy_to" : ["meta_data", "article_info"] },
+      "title" : { "type" : "string", "copy_to" : ["meta_data", "article_info"] }
     }
 }
 --------------------------------------------------

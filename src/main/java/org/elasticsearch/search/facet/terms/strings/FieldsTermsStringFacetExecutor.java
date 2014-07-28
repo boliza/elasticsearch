@@ -23,8 +23,8 @@ import com.google.common.collect.ImmutableSet;
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.index.fielddata.BytesValues;
 import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.index.fielddata.SortedBinaryDocValues;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.script.SearchScript;
 import org.elasticsearch.search.facet.FacetExecutor;
@@ -89,10 +89,10 @@ public class FieldsTermsStringFacetExecutor extends FacetExecutor {
     class Collector extends FacetExecutor.Collector {
 
         private final HashedAggregator aggregator;
-        private BytesValues[] values;
+        private SortedBinaryDocValues[] values;
 
         public Collector(HashedAggregator aggregator) {
-            values = new BytesValues[indexFieldDatas.length];
+            values = new SortedBinaryDocValues[indexFieldDatas.length];
             this.aggregator = aggregator;
 
         }
@@ -107,7 +107,7 @@ public class FieldsTermsStringFacetExecutor extends FacetExecutor {
         @Override
         public void setNextReader(AtomicReaderContext context) throws IOException {
             for (int i = 0; i < indexFieldDatas.length; i++) {
-                values[i] = indexFieldDatas[i].load(context).getBytesValues(true);
+                values[i] = indexFieldDatas[i].load(context).getBytesValues();
             }
             if (script != null) {
                 script.setNextReader(context);

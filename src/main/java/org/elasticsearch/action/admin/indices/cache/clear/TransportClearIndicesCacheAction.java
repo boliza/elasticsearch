@@ -21,6 +21,7 @@ package org.elasticsearch.action.admin.indices.cache.clear;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ShardOperationFailedException;
+import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.DefaultShardOperationFailedException;
 import org.elasticsearch.action.support.broadcast.BroadcastShardOperationFailedException;
 import org.elasticsearch.action.support.broadcast.TransportBroadcastOperationAction;
@@ -57,8 +58,8 @@ public class TransportClearIndicesCacheAction extends TransportBroadcastOperatio
     @Inject
     public TransportClearIndicesCacheAction(Settings settings, ThreadPool threadPool, ClusterService clusterService,
                                             TransportService transportService, IndicesService indicesService, IndicesTermsFilterCache termsFilterCache,
-                                            CacheRecycler cacheRecycler) {
-        super(settings, threadPool, clusterService, transportService);
+                                            CacheRecycler cacheRecycler, ActionFilters actionFilters) {
+        super(settings, ClearIndicesCacheAction.NAME, threadPool, clusterService, transportService, actionFilters);
         this.indicesService = indicesService;
         this.termsFilterCache = termsFilterCache;
         this.cacheRecycler = cacheRecycler;
@@ -67,11 +68,6 @@ public class TransportClearIndicesCacheAction extends TransportBroadcastOperatio
     @Override
     protected String executor() {
         return ThreadPool.Names.MANAGEMENT;
-    }
-
-    @Override
-    protected String transportAction() {
-        return ClearIndicesCacheAction.NAME;
     }
 
     @Override
@@ -107,7 +103,7 @@ public class TransportClearIndicesCacheAction extends TransportBroadcastOperatio
     }
 
     @Override
-    protected ShardClearIndicesCacheRequest newShardRequest(ShardRouting shard, ClearIndicesCacheRequest request) {
+    protected ShardClearIndicesCacheRequest newShardRequest(int numShards, ShardRouting shard, ClearIndicesCacheRequest request) {
         return new ShardClearIndicesCacheRequest(shard.index(), shard.id(), request);
     }
 
@@ -144,7 +140,7 @@ public class TransportClearIndicesCacheAction extends TransportBroadcastOperatio
                 }
             }
             if (request.recycler()) {
-                logger.info("Clear CacheRecycler on index [{}]", service.index());
+                logger.debug("Clear CacheRecycler on index [{}]", service.index());
                 clearedAtLeastOne = true;
                 // cacheRecycler.clear();
             }

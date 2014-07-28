@@ -20,15 +20,23 @@
 package org.elasticsearch.common.xcontent;
 
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.common.lease.Releasable;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Map;
 
 /**
+ * Interface for pull - parsing {@link XContent} see {@link XContentType} for supported types.
  *
+ * To obtain an instance of this class use the following pattern:
+ *
+ * <pre>
+ *     XContentType xContentType = XContentType.JSON;
+ *     XContentParser parser = xContentType.xContent().createParser("{\"key\" : \"value\"}");
+ * </pre>
  */
-public interface XContentParser extends Closeable {
+public interface XContentParser extends Releasable {
 
     enum Token {
         START_OBJECT {
@@ -189,6 +197,4 @@ public interface XContentParser extends Closeable {
     boolean booleanValue() throws IOException;
 
     byte[] binaryValue() throws IOException;
-
-    void close();
 }

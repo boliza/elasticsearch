@@ -20,6 +20,7 @@ package org.elasticsearch.action.admin.indices.alias.get;
 
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.master.TransportMasterNodeReadOperationAction;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
@@ -37,13 +38,8 @@ import java.util.List;
 public class TransportGetAliasesAction extends TransportMasterNodeReadOperationAction<GetAliasesRequest, GetAliasesResponse> {
 
     @Inject
-    public TransportGetAliasesAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool) {
-        super(settings, transportService, clusterService, threadPool);
-    }
-
-    @Override
-    protected String transportAction() {
-        return GetAliasesAction.NAME;
+    public TransportGetAliasesAction(Settings settings, TransportService transportService, ClusterService clusterService, ThreadPool threadPool, ActionFilters actionFilters) {
+        super(settings, GetAliasesAction.NAME, transportService, clusterService, threadPool, actionFilters);
     }
 
     @Override
@@ -64,11 +60,9 @@ public class TransportGetAliasesAction extends TransportMasterNodeReadOperationA
 
     @Override
     protected void masterOperation(GetAliasesRequest request, ClusterState state, ActionListener<GetAliasesResponse> listener) throws ElasticsearchException {
-        String[] concreteIndices = state.metaData().concreteIndices(request.indices(), request.indicesOptions());
-        request.indices(concreteIndices);
-
+        String[] concreteIndices = state.metaData().concreteIndices(request.indicesOptions(), request.indices());
         @SuppressWarnings("unchecked") // ImmutableList to List results incompatible type
-        ImmutableOpenMap<String, List<AliasMetaData>> result = (ImmutableOpenMap) state.metaData().findAliases(request.aliases(), request.indices());
+        ImmutableOpenMap<String, List<AliasMetaData>> result = (ImmutableOpenMap) state.metaData().findAliases(request.aliases(), concreteIndices);
         listener.onResponse(new GetAliasesResponse(result));
     }
 

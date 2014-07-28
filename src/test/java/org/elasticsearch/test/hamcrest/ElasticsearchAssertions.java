@@ -18,7 +18,11 @@
  */
 package org.elasticsearch.test.hamcrest;
 
+import com.google.common.base.Function;
 import com.google.common.base.Predicate;
+import com.google.common.base.Predicates;
+import com.google.common.collect.FluentIterable;
+import com.google.common.collect.Iterables;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.Query;
 import org.elasticsearch.ElasticsearchException;
@@ -31,6 +35,10 @@ import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ShardOperationFailedException;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequestBuilder;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
+import org.elasticsearch.action.admin.cluster.node.info.NodesInfoResponse;
+import org.elasticsearch.action.admin.cluster.node.info.PluginInfo;
+import org.elasticsearch.action.admin.cluster.node.info.PluginsInfo;
+import org.elasticsearch.action.admin.indices.alias.exists.AliasesExistResponse;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexResponse;
 import org.elasticsearch.action.admin.indices.template.get.GetIndexTemplatesResponse;
@@ -58,6 +66,7 @@ import org.elasticsearch.test.engine.MockInternalEngine;
 import org.elasticsearch.test.store.MockDirectoryHelper;
 import org.hamcrest.Matcher;
 import org.hamcrest.Matchers;
+import org.junit.Assert;
 
 import java.io.IOException;
 import java.lang.reflect.Constructor;
@@ -65,6 +74,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
+import static com.google.common.base.Predicates.isNull;
 import static org.elasticsearch.test.ElasticsearchTestCase.*;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
@@ -76,7 +86,7 @@ import static org.junit.Assert.fail;
  */
 public class ElasticsearchAssertions {
 
-    public static void assertAcked(AcknowledgedRequestBuilder<?, ?, ?> builder) {
+    public static void assertAcked(AcknowledgedRequestBuilder<?, ?, ?, ?> builder) {
         assertAcked(builder.get());
     }
 
@@ -85,7 +95,7 @@ public class ElasticsearchAssertions {
     }
 
     public static void assertNoTimeout(ClusterHealthResponse response) {
-        assertThat("ClusterHealthResponse has timed out - returned status: [" + response.getStatus() + "]", response.isTimedOut(), is(false));
+        assertThat("ClusterHealthResponse has timed out - returned: [" + response + "]", response.isTimedOut(), is(false));
     }
 
     public static void assertAcked(AcknowledgedResponse response) {
@@ -304,6 +314,22 @@ public class ElasticsearchAssertions {
         assertVersionSerializable(searchSuggest);
     }
 
+    public static void assertSuggestionPhraseCollateMatchExists(Suggest searchSuggest, String key, int numberOfPhraseExists) {
+        int counter = 0;
+        assertThat(searchSuggest, notNullValue());
+        String msg = "Suggest result: " + searchSuggest.toString();
+        assertThat(msg, searchSuggest.size(), greaterThanOrEqualTo(1));
+        assertThat(msg, searchSuggest.getSuggestion(key).getName(), equalTo(key));
+
+        for (Suggest.Suggestion.Entry.Option option : searchSuggest.getSuggestion(key).getEntries().get(0).getOptions()) {
+            if (option.collateMatch()) {
+                counter++;
+            }
+        }
+
+        assertThat(counter, equalTo(numberOfPhraseExists));
+    }
+
     public static void assertSuggestion(Suggest searchSuggest, int entry, int ord, String key, String text) {
         assertThat(searchSuggest, notNullValue());
         String msg = "Suggest result: " + searchSuggest.toString();
@@ -355,6 +381,20 @@ public class ElasticsearchAssertions {
         assertThat(templateNames, hasItem(name));
     }
 
+    /**
+     * Assert that aliases are missing
+     */
+    public static void assertAliasesMissing(AliasesExistResponse aliasesExistResponse) {
+        assertFalse("Aliases shouldn't exist", aliasesExistResponse.exists());
+    }
+
+    /**
+     * Assert that aliases exist
+     */
+    public static void assertAliasesExist(AliasesExistResponse aliasesExistResponse) {
+        assertTrue("Aliases should exist", aliasesExistResponse.exists());
+    }
+
     /*
      * matchers
      */
@@ -382,11 +422,11 @@ public class ElasticsearchAssertions {
         return (T) q.getClauses()[i].getQuery();
     }
 
-    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?> builder, Class<E> exceptionClass) {
+    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?, ?> builder, Class<E> exceptionClass) {
         assertThrows(builder.execute(), exceptionClass);
     }
 
-    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?> builder, Class<E> exceptionClass, String extraInfo) {
+    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?, ?> builder, Class<E> exceptionClass, String extraInfo) {
         assertThrows(builder.execute(), exceptionClass, extraInfo);
     }
 
@@ -414,11 +454,11 @@ public class ElasticsearchAssertions {
         }
     }
 
-    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?> builder, RestStatus status) {
+    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?, ?> builder, RestStatus status) {
         assertThrows(builder.execute(), status);
     }
 
-    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?> builder, RestStatus status, String extraInfo) {
+    public static <E extends Throwable> void assertThrows(ActionRequestBuilder<?, ?, ?, ?> builder, RestStatus status, String extraInfo) {
         assertThrows(builder.execute(), status, extraInfo);
     }
 
@@ -545,12 +585,7 @@ public class ElasticsearchAssertions {
         try {
             for (final MockDirectoryHelper.ElasticsearchMockDirectoryWrapper w : MockDirectoryHelper.wrappers) {
                 try {
-                    awaitBusy(new Predicate<Object>() {
-                        @Override
-                        public boolean apply(Object input) {
-                            return !w.isOpen();
-                        }
-                    });
+                    w.awaitClosed(5000);
                 } catch (InterruptedException e) {
                     Thread.interrupted();
                 }
@@ -575,4 +610,96 @@ public class ElasticsearchAssertions {
         }
     }
 
+    public static void assertNodeContainsPlugins(NodesInfoResponse response, String nodeId,
+                                           List<String> expectedJvmPluginNames,
+                                           List<String> expectedJvmPluginDescriptions,
+                                           List<String> expectedJvmVersions,
+                                           List<String> expectedSitePluginNames,
+                                           List<String> expectedSitePluginDescriptions,
+                                           List<String> expectedSiteVersions) {
+
+        Assert.assertThat(response.getNodesMap().get(nodeId), notNullValue());
+
+        PluginsInfo plugins = response.getNodesMap().get(nodeId).getPlugins();
+        Assert.assertThat(plugins, notNullValue());
+
+        List<String> pluginNames = FluentIterable.from(plugins.getInfos()).filter(jvmPluginPredicate).transform(nameFunction).toList();
+        for (String expectedJvmPluginName : expectedJvmPluginNames) {
+            Assert.assertThat(pluginNames, hasItem(expectedJvmPluginName));
+        }
+
+        List<String> pluginDescriptions = FluentIterable.from(plugins.getInfos()).filter(jvmPluginPredicate).transform(descriptionFunction).toList();
+        for (String expectedJvmPluginDescription : expectedJvmPluginDescriptions) {
+            Assert.assertThat(pluginDescriptions, hasItem(expectedJvmPluginDescription));
+        }
+
+        List<String> jvmPluginVersions = FluentIterable.from(plugins.getInfos()).filter(jvmPluginPredicate).transform(versionFunction).toList();
+        for (String pluginVersion : expectedJvmVersions) {
+            Assert.assertThat(jvmPluginVersions, hasItem(pluginVersion));
+        }
+
+        FluentIterable<String> jvmUrls = FluentIterable.from(plugins.getInfos())
+                .filter(Predicates.and(jvmPluginPredicate, Predicates.not(sitePluginPredicate)))
+                .filter(isNull())
+                .transform(urlFunction);
+        Assert.assertThat(Iterables.size(jvmUrls), is(0));
+
+        List<String> sitePluginNames = FluentIterable.from(plugins.getInfos()).filter(sitePluginPredicate).transform(nameFunction).toList();
+        Assert.assertThat(sitePluginNames.isEmpty(), is(expectedSitePluginNames.isEmpty()));
+        for (String expectedSitePluginName : expectedSitePluginNames) {
+            Assert.assertThat(sitePluginNames, hasItem(expectedSitePluginName));
+        }
+
+        List<String> sitePluginDescriptions = FluentIterable.from(plugins.getInfos()).filter(sitePluginPredicate).transform(descriptionFunction).toList();
+        Assert.assertThat(sitePluginDescriptions.isEmpty(), is(expectedSitePluginDescriptions.isEmpty()));
+        for (String sitePluginDescription : expectedSitePluginDescriptions) {
+            Assert.assertThat(sitePluginDescriptions, hasItem(sitePluginDescription));
+        }
+
+        List<String> sitePluginUrls = FluentIterable.from(plugins.getInfos()).filter(sitePluginPredicate).transform(urlFunction).toList();
+        Assert.assertThat(sitePluginUrls, not(contains(nullValue())));
+
+
+        List<String> sitePluginVersions = FluentIterable.from(plugins.getInfos()).filter(sitePluginPredicate).transform(versionFunction).toList();
+        Assert.assertThat(sitePluginVersions.isEmpty(), is(expectedSiteVersions.isEmpty()));
+        for (String pluginVersion : expectedSiteVersions) {
+            Assert.assertThat(sitePluginVersions, hasItem(pluginVersion));
+        }
+    }
+
+    private static Predicate<PluginInfo> jvmPluginPredicate = new Predicate<PluginInfo>() {
+        public boolean apply(PluginInfo pluginInfo) {
+            return pluginInfo.isJvm();
+        }
+    };
+
+    private static Predicate<PluginInfo> sitePluginPredicate = new Predicate<PluginInfo>() {
+        public boolean apply(PluginInfo pluginInfo) {
+            return pluginInfo.isSite();
+        }
+    };
+
+    private static Function<PluginInfo, String> nameFunction = new Function<PluginInfo, String>() {
+        public String apply(PluginInfo pluginInfo) {
+            return pluginInfo.getName();
+        }
+    };
+
+    private static Function<PluginInfo, String> descriptionFunction = new Function<PluginInfo, String>() {
+        public String apply(PluginInfo pluginInfo) {
+            return pluginInfo.getDescription();
+        }
+    };
+
+    private static Function<PluginInfo, String> urlFunction = new Function<PluginInfo, String>() {
+        public String apply(PluginInfo pluginInfo) {
+            return pluginInfo.getUrl();
+        }
+    };
+
+    private static Function<PluginInfo, String> versionFunction = new Function<PluginInfo, String>() {
+        public String apply(PluginInfo pluginInfo) {
+            return pluginInfo.getVersion();
+        }
+    };
 }

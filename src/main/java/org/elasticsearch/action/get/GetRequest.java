@@ -267,7 +267,7 @@ public class GetRequest extends SingleShardOperationRequest<GetRequest> {
         }
 
         this.versionType = VersionType.fromValue(in.readByte());
-        this.version = in.readVLong();
+        this.version = Versions.readVersionWithVLongForBW(in);
 
         fetchSourceContext = FetchSourceContext.optionalReadFromStream(in);
     }
@@ -298,13 +298,13 @@ public class GetRequest extends SingleShardOperationRequest<GetRequest> {
         }
 
         out.writeByte(versionType.getValue());
-        out.writeVLong(version);
+        Versions.writeVersionWithVLongForBW(version, out);
 
         FetchSourceContext.optionalWriteToStream(fetchSourceContext, out);
     }
 
     @Override
     public String toString() {
-        return "[" + index + "][" + type + "][" + id + "]: routing [" + routing + "]";
+        return "get [" + index + "][" + type + "][" + id + "]: routing [" + routing + "]";
     }
 }

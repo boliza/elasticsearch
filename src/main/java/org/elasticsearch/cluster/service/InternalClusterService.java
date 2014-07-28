@@ -34,6 +34,7 @@ import org.elasticsearch.cluster.routing.operation.OperationRouting;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
+import org.elasticsearch.common.component.LifecycleListener;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
@@ -130,6 +131,24 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
         this.clusterState = ClusterState.builder(clusterState).blocks(initialBlocks).build();
         this.updateTasksExecutor = EsExecutors.newSinglePrioritizing(daemonThreadFactory(settings, "clusterService#updateTask"));
         this.reconnectToNodes = threadPool.schedule(reconnectInterval, ThreadPool.Names.GENERIC, new ReconnectToNodes());
+        discoveryService.addLifecycleListener(new LifecycleListener() {
+            @Override
+            public void afterStart() {
+                submitStateUpdateTask("update local node", Priority.IMMEDIATE, new ClusterStateUpdateTask() {
+                    @Override
+                    public ClusterState execute(ClusterState currentState) throws Exception {
+                        return ClusterState.builder(currentState)
+                                .nodes(DiscoveryNodes.builder(currentState.nodes()).put(localNode()).localNodeId(localNode().id()))
+                                .build();
+                    }
+
+                    @Override
+                    public void onFailure(String source, Throwable t) {
+                        logger.warn("failed ot update local node", t);
+                    }
+                });
+            }
+        });
     }
 
     @Override
@@ -279,7 +298,7 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
                 timeInQueue = -1;
             }
 
-            pendingClusterTasks.add(new PendingClusterTask(pending.insertionOrder, pending.priority, new StringText(source), timeInQueue));
+            pendingClusterTasks.add(new PendingClusterTask(pending.insertionOrder, pending.priority, new StringText(source), timeInQueue, pending.executing));
         }
         return pendingClusterTasks;
     }
@@ -379,10 +398,8 @@ public class InternalClusterService extends AbstractLifecycleComponent<ClusterSe
                 newClusterState.status(ClusterState.ClusterStateStatus.BEING_APPLIED);
 
                 if (logger.isTraceEnabled()) {
-                    StringBuilder sb = new StringBuilder("cluster state updated:\nversion [").append(newClusterState.version()).append("], source [").append(source).append("]\n");
-                    sb.append(newClusterState.nodes().prettyPrint());
-                    sb.append(newClusterState.routingTable().prettyPrint());
-                    sb.append(newClusterState.readOnlyRoutingNodes().prettyPrint());
+                    StringBuilder sb = new StringBuilder("cluster state updated, source [").append(source).append("]\n");
+                    sb.append(newClusterState.prettyPrint());
                     logger.trace(sb.toString());
                 } else if (logger.isDebugEnabled()) {
                     logger.debug("cluster state updated, version [{}], source [{}]", newClusterState.version(), source);

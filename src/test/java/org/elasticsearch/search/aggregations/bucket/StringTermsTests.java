@@ -22,8 +22,10 @@ import com.google.common.base.Strings;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.index.mapper.internal.FieldNamesFieldMapper;
 import org.elasticsearch.index.mapper.internal.IndexFieldMapper;
 import org.elasticsearch.index.query.FilterBuilders;
+import org.elasticsearch.search.aggregations.Aggregator.SubAggCollectionMode;
 import org.elasticsearch.search.aggregations.bucket.filter.Filter;
 import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
 import org.elasticsearch.search.aggregations.bucket.terms.Terms;
@@ -37,7 +39,6 @@ import org.hamcrest.Matchers;
 import org.junit.Test;
 
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.regex.Pattern;
@@ -61,12 +62,6 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     private static final String MULTI_VALUED_FIELD_NAME = "s_values";
 
     public static String randomExecutionHint() {
-        EnumSet<ExecutionMode> modes = EnumSet.allOf(ExecutionMode.class);
-        modes.remove(ExecutionMode.GLOBAL_ORDINALS_LOW_CARDINALITY);
-        return randomBoolean() ? null : randomFrom(modes.toArray()).toString();
-    }
-
-    public static String randomAllExecutionHint() {
         return randomBoolean() ? null : randomFrom(ExecutionMode.values()).toString();
     }
 
@@ -114,8 +109,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
         final int minDocCount = randomInt(1);
         SearchResponse response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .minDocCount(minDocCount)
                         .size(0))
                 .execute().actionGet();
@@ -133,10 +129,11 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
-                        .field(SINGLE_VALUED_FIELD_NAME))
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())))
                 .execute().actionGet();
 
-        assertSearchResponse(response);
+        assertSearchResponse(response);System.out.println(response);
 
         Terms terms = response.getAggregations().get("terms");
         assertThat(terms, notNullValue());
@@ -164,7 +161,8 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
             SearchResponse response = client().prepareSearch("idx").setTypes("type")
                     .addAggregation(terms("terms")
                             .executionHint(executionMode == null ? null : executionMode.toString())
-                            .field(SINGLE_VALUED_FIELD_NAME))
+                            .field(SINGLE_VALUED_FIELD_NAME)
+                            .collectMode(randomFrom(SubAggCollectionMode.values())))
                     .execute().actionGet();
             assertSearchResponse(response);
 
@@ -189,7 +187,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         SearchResponse response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).include("val00.+"))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .include("val00.+"))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -211,7 +212,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).include("val00.+").exclude("(val000|val001)"))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .include("val00.+").exclude("(val000|val001)"))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -233,7 +237,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).exclude("val0[1-9]+.+"))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .exclude("val0[1-9]+.+"))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -260,7 +267,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         SearchResponse response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).include("VAL00.+", Pattern.CASE_INSENSITIVE))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())).include("VAL00.+", Pattern.CASE_INSENSITIVE))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -283,7 +292,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).include("val00.+").exclude("( val000 | VAL001 )#this is a comment", Pattern.CASE_INSENSITIVE | Pattern.COMMENTS))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())).include("val00.+").exclude("( val000 | VAL001 )#this is a comment", Pattern.CASE_INSENSITIVE | Pattern.COMMENTS))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -306,7 +317,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
         response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .field(SINGLE_VALUED_FIELD_NAME).exclude("val0[1-9]+.+", 0))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())).exclude("val0[1-9]+.+", 0))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -329,9 +342,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void singleValueField_WithMaxSize() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("high_card_type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
                         .size(20)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.term(true))) // we need to sort by terms cause we're checking the first 20 values
                 .execute().actionGet();
 
@@ -354,8 +368,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void singleValueField_OrderedByTermAsc() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.term(true)))
                 .execute().actionGet();
 
@@ -379,8 +394,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void singleValueField_OrderedByTermDesc() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.term(false)))
                 .execute().actionGet();
 
@@ -406,6 +422,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .subAggregation(count("count").field(MULTI_VALUED_FIELD_NAME)))
                 .execute().actionGet();
 
@@ -433,6 +450,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .subAggregation(count("count")))
                 .execute().actionGet();
 
@@ -458,8 +476,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void singleValuedField_WithValueScript() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .script("'foo_' + _value"))
                 .execute().actionGet();
 
@@ -482,8 +501,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void multiValuedField_WithValueScript_NotUnique() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(MULTI_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .script("_value.substring(0,3)"))
                 .execute().actionGet();
 
@@ -504,8 +524,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void multiValuedField() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
-                        .field(MULTI_VALUED_FIELD_NAME))
+                        .executionHint(randomExecutionHint())
+                        .field(MULTI_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -531,8 +552,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void multiValuedField_WithValueScript() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .field(MULTI_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .script("'foo_' + _value"))
                 .execute().actionGet();
 
@@ -579,6 +601,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(MULTI_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .script("'foo_' + _value")
                         .subAggregation(count("count")))
                 .execute().actionGet();
@@ -612,7 +635,8 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void script_SingleValue() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .executionHint(randomExecutionHint())
                         .script("doc['" + SINGLE_VALUED_FIELD_NAME + "'].value"))
                 .execute().actionGet();
 
@@ -635,7 +659,8 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void script_SingleValue_ExplicitSingleValue() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .executionHint(randomExecutionHint())
                         .script("doc['" + SINGLE_VALUED_FIELD_NAME + "'].value"))
                 .execute().actionGet();
 
@@ -658,6 +683,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void script_SingleValue_WithSubAggregator_Inherited() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .executionHint(randomExecutionHint())
                         .script("doc['" + SINGLE_VALUED_FIELD_NAME + "'].value")
                         .subAggregation(count("count")))
@@ -685,7 +711,8 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void script_MultiValued() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .executionHint(randomExecutionHint())
                         .script("doc['" + MULTI_VALUED_FIELD_NAME + "'].values"))
                 .execute().actionGet();
 
@@ -712,6 +739,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void script_MultiValued_WithAggregatorInherited() throws Exception {
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
                 .addAggregation(terms("terms")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .executionHint(randomExecutionHint())
                         .script("doc['" + MULTI_VALUED_FIELD_NAME + "'].values")
                         .subAggregation(count("count")))
@@ -746,9 +774,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void unmapped() throws Exception {
         SearchResponse response = client().prepareSearch("idx_unmapped").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
+                        .executionHint(randomExecutionHint())
                         .size(randomInt(5))
-                        .field(SINGLE_VALUED_FIELD_NAME))
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -763,8 +792,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void partiallyUnmapped() throws Exception {
         SearchResponse response = client().prepareSearch("idx", "idx_unmapped").setTypes("type")
                 .addAggregation(terms("terms")
-                        .executionHint(randomAllExecutionHint())
-                        .field(SINGLE_VALUED_FIELD_NAME))
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values())))
                 .execute().actionGet();
 
         assertSearchResponse(response);
@@ -786,7 +816,8 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     public void stringTermsNestedIntoPerBucketAggregator() throws Exception {
         // no execution hint so that the logic that decides whether or not to use ordinals is executed
         SearchResponse response = client().prepareSearch("idx").setTypes("type")
-                .addAggregation(filter("filter").filter(termFilter(MULTI_VALUED_FIELD_NAME, "val3")).subAggregation(terms("terms").field(MULTI_VALUED_FIELD_NAME)))
+                .addAggregation(filter("filter").filter(termFilter(MULTI_VALUED_FIELD_NAME, "val3")).subAggregation(terms("terms").field(MULTI_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))))
                 .execute().actionGet();
 
         assertThat(response.getFailedShards(), equalTo(0));
@@ -833,6 +864,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("avg_i", asc))
                         .subAggregation(avg("avg_i").field("i"))
                 ).execute().actionGet();
@@ -864,6 +896,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("tags")
                         .executionHint(randomExecutionHint())
                         .field("tag")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("filter", asc))
                         .subAggregation(filter("filter").filter(FilterBuilders.matchAllFilter()))
                 ).execute().actionGet();
@@ -902,6 +935,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("tags")
                         .executionHint(randomExecutionHint())
                         .field("tag")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("filter1>filter2>stats.max", asc))
                         .subAggregation(filter("filter1").filter(FilterBuilders.matchAllFilter())
                                 .subAggregation(filter("filter2").filter(FilterBuilders.matchAllFilter())
@@ -950,6 +984,130 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
         assertThat(stats.getMax(), equalTo(asc ? 4.0 : 2.0));
     }
 
+    @Test
+    public void singleValuedField_OrderedBySubAggregationAsc_MultiHierarchyLevels_specialChars() throws Exception {
+        StringBuilder filter2NameBuilder = new StringBuilder("filt.er2");
+        filter2NameBuilder.append(randomAsciiOfLengthBetween(3, 10).replace("[", "").replace("]", "").replace(">", ""));
+        String filter2Name = filter2NameBuilder.toString();
+        StringBuilder statsNameBuilder = new StringBuilder("st.ats");
+        statsNameBuilder.append(randomAsciiOfLengthBetween(3, 10).replace("[", "").replace("]", "").replace(">", ""));
+        String statsName = statsNameBuilder.toString();
+        boolean asc = randomBoolean();
+        SearchResponse response = client().prepareSearch("idx").setTypes("type")
+                .addAggregation(terms("tags")
+                        .executionHint(randomExecutionHint())
+                        .field("tag")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .order(Terms.Order.aggregation("filter1>" + filter2Name + ">" + statsName + ".max", asc))
+                        .subAggregation(filter("filter1").filter(FilterBuilders.matchAllFilter())
+                                .subAggregation(filter(filter2Name).filter(FilterBuilders.matchAllFilter())
+                                        .subAggregation(stats(statsName).field("i"))))
+                ).execute().actionGet();
+
+
+        assertSearchResponse(response);
+
+        Terms tags = response.getAggregations().get("tags");
+        assertThat(tags, notNullValue());
+        assertThat(tags.getName(), equalTo("tags"));
+        assertThat(tags.getBuckets().size(), equalTo(2));
+
+        Iterator<Terms.Bucket> iters = tags.getBuckets().iterator();
+
+        // the max for "more" is 2
+        // the max for "less" is 4
+
+        Terms.Bucket tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "more" : "less"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter2 = filter1.getAggregations().get(filter2Name);
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 3l : 2l));
+        Stats stats = filter2.getAggregations().get(statsName);
+        assertThat(stats, notNullValue());
+        assertThat(stats.getMax(), equalTo(asc ? 2.0 : 4.0));
+
+        tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "less" : "more"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter2 = filter1.getAggregations().get(filter2Name);
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 2l : 3l));
+        stats = filter2.getAggregations().get(statsName);
+        assertThat(stats, notNullValue());
+        assertThat(stats.getMax(), equalTo(asc ? 4.0 : 2.0));
+    }
+
+    @Test
+    public void singleValuedField_OrderedBySubAggregationAsc_MultiHierarchyLevels_specialCharsNoDotNotation() throws Exception {
+        StringBuilder filter2NameBuilder = new StringBuilder("filt.er2");
+        filter2NameBuilder.append(randomAsciiOfLengthBetween(3, 10).replace("[", "").replace("]", "").replace(">", ""));
+        String filter2Name = filter2NameBuilder.toString();
+        StringBuilder statsNameBuilder = new StringBuilder("st.ats");
+        statsNameBuilder.append(randomAsciiOfLengthBetween(3, 10).replace("[", "").replace("]", "").replace(">", ""));
+        String statsName = statsNameBuilder.toString();
+        boolean asc = randomBoolean();
+        SearchResponse response = client().prepareSearch("idx").setTypes("type")
+                .addAggregation(terms("tags")
+                        .executionHint(randomExecutionHint())
+                        .field("tag")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .order(Terms.Order.aggregation("filter1>" + filter2Name + ">" + statsName + "[max]", asc))
+                        .subAggregation(filter("filter1").filter(FilterBuilders.matchAllFilter())
+                                .subAggregation(filter(filter2Name).filter(FilterBuilders.matchAllFilter())
+                                        .subAggregation(stats(statsName).field("i"))))
+                ).execute().actionGet();
+
+
+        assertSearchResponse(response);
+
+        Terms tags = response.getAggregations().get("tags");
+        assertThat(tags, notNullValue());
+        assertThat(tags.getName(), equalTo("tags"));
+        assertThat(tags.getBuckets().size(), equalTo(2));
+
+        Iterator<Terms.Bucket> iters = tags.getBuckets().iterator();
+
+        // the max for "more" is 2
+        // the max for "less" is 4
+
+        Terms.Bucket tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "more" : "less"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 3l : 2l));
+        Filter filter2 = filter1.getAggregations().get(filter2Name);
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 3l : 2l));
+        Stats stats = filter2.getAggregations().get(statsName);
+        assertThat(stats, notNullValue());
+        assertThat(stats.getMax(), equalTo(asc ? 2.0 : 4.0));
+
+        tag = iters.next();
+        assertThat(tag, notNullValue());
+        assertThat(key(tag), equalTo(asc ? "less" : "more"));
+        assertThat(tag.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter1 = tag.getAggregations().get("filter1");
+        assertThat(filter1, notNullValue());
+        assertThat(filter1.getDocCount(), equalTo(asc ? 2l : 3l));
+        filter2 = filter1.getAggregations().get(filter2Name);
+        assertThat(filter2, notNullValue());
+        assertThat(filter2.getDocCount(), equalTo(asc ? 2l : 3l));
+        stats = filter2.getAggregations().get(statsName);
+        assertThat(stats, notNullValue());
+        assertThat(stats.getMax(), equalTo(asc ? 4.0 : 2.0));
+    }
+
 
     @Test
     public void singleValuedField_OrderedByMissingSubAggregation() throws Exception {
@@ -957,8 +1115,9 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
 
             client().prepareSearch("idx").setTypes("type")
                     .addAggregation(terms("terms")
-                            .executionHint(randomAllExecutionHint())
+                            .executionHint(randomExecutionHint())
                             .field(SINGLE_VALUED_FIELD_NAME)
+                            .collectMode(randomFrom(SubAggCollectionMode.values()))
                             .order(Terms.Order.aggregation("avg_i", true))
                     ).execute().actionGet();
 
@@ -977,8 +1136,10 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                     .addAggregation(terms("terms")
                             .executionHint(randomExecutionHint())
                             .field(SINGLE_VALUED_FIELD_NAME)
+                            .collectMode(randomFrom(SubAggCollectionMode.values()))
                             .order(Terms.Order.aggregation("values", true))
-                            .subAggregation(terms("values").field("i"))
+                            .subAggregation(terms("values").field("i")
+                                    .collectMode(randomFrom(SubAggCollectionMode.values())))
                     ).execute().actionGet();
 
             fail("Expected search to fail when trying to sort terms aggregation by sug-aggregation which is not of a metrics or single-bucket type");
@@ -995,6 +1156,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                     .addAggregation(terms("terms")
                             .executionHint(randomExecutionHint())
                             .field(SINGLE_VALUED_FIELD_NAME)
+                            .collectMode(randomFrom(SubAggCollectionMode.values()))
                             .order(Terms.Order.aggregation("stats.foo", true))
                             .subAggregation(stats("stats").field("i"))
                     ).execute().actionGet();
@@ -1015,6 +1177,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                     .addAggregation(terms("terms")
                             .executionHint(randomExecutionHint())
                             .field(SINGLE_VALUED_FIELD_NAME)
+                            .collectMode(randomFrom(SubAggCollectionMode.values()))
                             .order(Terms.Order.aggregation("stats", true))
                             .subAggregation(stats("stats").field("i"))
                     ).execute().actionGet();
@@ -1034,6 +1197,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("avg_i", asc))
                         .subAggregation(avg("avg_i").field("i"))
                 ).execute().actionGet();
@@ -1067,6 +1231,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("stats.avg", asc))
                         .subAggregation(stats("stats").field("i"))
                 ).execute().actionGet();
@@ -1099,6 +1264,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("stats.avg", asc))
                         .subAggregation(stats("stats").field("i"))
                 ).execute().actionGet();
@@ -1131,6 +1297,7 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
                 .addAggregation(terms("terms")
                         .executionHint(randomExecutionHint())
                         .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .order(Terms.Order.aggregation("stats.sum_of_squares", asc))
                         .subAggregation(extendedStats("stats").field("i"))
                 ).execute().actionGet();
@@ -1157,9 +1324,55 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
     }
 
     @Test
+    public void singleValuedField_OrderedByStatsAggAscWithTermsSubAgg() throws Exception {
+        boolean asc = true;
+        SearchResponse response = client().prepareSearch("idx").setTypes("type")
+                .addAggregation(terms("terms")
+                        .executionHint(randomExecutionHint())
+                        .field(SINGLE_VALUED_FIELD_NAME)
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
+                        .order(Terms.Order.aggregation("stats.sum_of_squares", asc))
+                        .subAggregation(extendedStats("stats").field("i")).subAggregation(terms("subTerms").field("s_values")
+                                .collectMode(randomFrom(SubAggCollectionMode.values())))
+                ).execute().actionGet();
+
+        assertSearchResponse(response);
+
+        Terms terms = response.getAggregations().get("terms");
+        assertThat(terms, notNullValue());
+        assertThat(terms.getName(), equalTo("terms"));
+        assertThat(terms.getBuckets().size(), equalTo(5));
+
+        int i = 0;
+        for (Terms.Bucket bucket : terms.getBuckets()) {
+            assertThat(bucket, notNullValue());
+            assertThat(key(bucket), equalTo("val" + i));
+            assertThat(bucket.getDocCount(), equalTo(1l));
+
+            ExtendedStats stats = bucket.getAggregations().get("stats");
+            assertThat(stats, notNullValue());
+            assertThat(stats.getMax(), equalTo((double) i));
+
+            Terms subTermsAgg = bucket.getAggregations().get("subTerms");
+            assertThat(subTermsAgg, notNullValue());
+            assertThat(subTermsAgg.getBuckets().size(), equalTo(2));
+            int j = i;
+            for (Terms.Bucket subBucket : subTermsAgg.getBuckets()) {
+                assertThat(subBucket, notNullValue());
+                assertThat(key(subBucket), equalTo("val" + j));
+                assertThat(subBucket.getDocCount(), equalTo(1l));
+                j++;
+            }
+            i++;
+        }
+
+    }
+
+    @Test
     public void indexMetaField() throws Exception {
         SearchResponse response = client().prepareSearch("idx", "empty_bucket_idx").setTypes("type")
                 .addAggregation(terms("terms")
+                        .collectMode(randomFrom(SubAggCollectionMode.values()))
                         .executionHint(randomExecutionHint())
                         .field(IndexFieldMapper.NAME)
                 ).execute().actionGet();
@@ -1177,5 +1390,14 @@ public class StringTermsTests extends ElasticsearchIntegrationTest {
             assertThat(bucket.getDocCount(), equalTo(i == 0 ? 5L : 2L));
             i++;
         }
+
+        response = client().prepareSearch("idx", "empty_bucket_idx").setTypes("type")
+                .addAggregation(terms("terms")
+                        .executionHint(randomExecutionHint())
+                        .field(FieldNamesFieldMapper.NAME)
+                ).execute().actionGet();
+        assertSearchResponse(response);
+        terms = response.getAggregations().get("terms");
+        assertEquals(5L, terms.getBucketByKey("i").getDocCount());
     }
 }

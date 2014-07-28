@@ -93,11 +93,17 @@ import org.elasticsearch.rest.action.main.RestMainAction;
 import org.elasticsearch.rest.action.mlt.RestMoreLikeThisAction;
 import org.elasticsearch.rest.action.percolate.RestMultiPercolateAction;
 import org.elasticsearch.rest.action.percolate.RestPercolateAction;
+import org.elasticsearch.rest.action.script.RestDeleteIndexedScriptAction;
+import org.elasticsearch.rest.action.script.RestGetIndexedScriptAction;
+import org.elasticsearch.rest.action.script.RestPutIndexedScriptAction;
 import org.elasticsearch.rest.action.search.RestClearScrollAction;
 import org.elasticsearch.rest.action.search.RestMultiSearchAction;
 import org.elasticsearch.rest.action.search.RestSearchAction;
 import org.elasticsearch.rest.action.search.RestSearchScrollAction;
 import org.elasticsearch.rest.action.suggest.RestSuggestAction;
+import org.elasticsearch.rest.action.template.RestDeleteSearchTemplateAction;
+import org.elasticsearch.rest.action.template.RestGetSearchTemplateAction;
+import org.elasticsearch.rest.action.template.RestPutSearchTemplateAction;
 import org.elasticsearch.rest.action.termvector.RestMultiTermVectorsAction;
 import org.elasticsearch.rest.action.termvector.RestTermVectorAction;
 import org.elasticsearch.rest.action.update.RestUpdateAction;
@@ -213,6 +219,17 @@ public class RestActionModule extends AbstractModule {
         // Benchmark API
         bind(RestBenchAction.class).asEagerSingleton();
 
+        // Templates API
+        bind(RestGetSearchTemplateAction.class).asEagerSingleton();
+        bind(RestPutSearchTemplateAction.class).asEagerSingleton();
+        bind(RestDeleteSearchTemplateAction.class).asEagerSingleton();
+
+        // Scripts API
+        bind(RestGetIndexedScriptAction.class).asEagerSingleton();
+        bind(RestPutIndexedScriptAction.class).asEagerSingleton();
+        bind(RestDeleteIndexedScriptAction.class).asEagerSingleton();
+
+
         // cat API
         Multibinder<AbstractCatAction> catActionMultibinder = Multibinder.newSetBinder(binder(), AbstractCatAction.class);
         catActionMultibinder.addBinding().to(RestAllocationAction.class).asEagerSingleton();
@@ -230,6 +247,7 @@ public class RestActionModule extends AbstractModule {
         catActionMultibinder.addBinding().to(RestAliasAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestThreadPoolAction.class).asEagerSingleton();
         catActionMultibinder.addBinding().to(RestPluginsAction.class).asEagerSingleton();
+        catActionMultibinder.addBinding().to(RestFielddataAction.class).asEagerSingleton();
         // no abstract cat action
         bind(RestCatAction.class).asEagerSingleton();
     }

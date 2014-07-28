@@ -19,12 +19,14 @@
 
 package org.elasticsearch.action.mlt;
 
+import com.google.common.collect.Lists;
 import org.elasticsearch.ElasticsearchGenerationException;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
-import org.elasticsearch.action.ActionRequest;
-import org.elasticsearch.action.ActionRequestValidationException;
-import org.elasticsearch.action.ValidateActions;
+import org.elasticsearch.Version;
+import org.elasticsearch.action.*;
+import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchType;
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesArray;
@@ -37,6 +39,7 @@ import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.search.Scroll.readScroll;
@@ -51,7 +54,7 @@ import static org.elasticsearch.search.Scroll.readScroll;
  * @see org.elasticsearch.client.Requests#moreLikeThisRequest(String)
  * @see org.elasticsearch.action.search.SearchResponse
  */
-public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
+public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> implements CompositeIndicesRequest {
 
     private String index;
 
@@ -72,6 +75,7 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
     private int minWordLength = -1;
     private int maxWordLength = -1;
     private float boostTerms = -1;
+    private boolean include = false;
 
     private SearchType searchType = SearchType.DEFAULT;
     private int searchSize = 0;
@@ -111,6 +115,43 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
 
     void index(String index) {
         this.index = index;
+    }
+
+    public IndicesOptions indicesOptions() {
+        return IndicesOptions.strictSingleIndexNoExpandForbidClosed();
+    }
+
+    @Override
+    public List<? extends IndicesRequest> subRequests() {
+        //we create two fake indices subrequests as we don't have the actual ones yet
+        //since they get created later on in TransportMoreLikeThisAction
+        List<IndicesRequest> requests = Lists.newArrayList();
+        requests.add(new IndicesRequest() {
+            @Override
+            public String[] indices() {
+                return new String[]{index};
+            }
+
+            @Override
+            public IndicesOptions indicesOptions() {
+                return MoreLikeThisRequest.this.indicesOptions();
+            }
+        });
+        requests.add(new IndicesRequest() {
+            @Override
+            public String[] indices() {
+                if (searchIndices != null) {
+                    return searchIndices;
+                }
+                return new String[]{index};
+            }
+
+            @Override
+            public IndicesOptions indicesOptions() {
+                return SearchRequest.DEFAULT_INDICES_OPTIONS;
+            }
+        });
+        return requests;
     }
 
     /**
@@ -311,6 +352,21 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
      */
     public float boostTerms() {
         return this.boostTerms;
+    }
+
+    /**
+     * Whether to include the queried document. Defaults to <tt>false</tt>.
+     */
+    public MoreLikeThisRequest include(boolean include) {
+        this.include = include;
+        return this;
+    }
+
+    /**
+     * Whether to include the queried document. Defaults to <tt>false</tt>.
+     */
+    public boolean include() {
+        return this.include;
     }
 
     void beforeLocalFork() {
@@ -553,6 +609,12 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
         minWordLength = in.readVInt();
         maxWordLength = in.readVInt();
         boostTerms = in.readFloat();
+        if (in.getVersion().onOrAfter(Version.V_1_2_0)) {
+            include = in.readBoolean();
+        } else {
+            include = false; // hard-coded behavior until Elasticsearch 1.2
+        }
+
         searchType = SearchType.fromId(in.readByte());
         if (in.readBoolean()) {
             searchQueryHint = in.readString();
@@ -622,6 +684,9 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> {
         out.writeVInt(minWordLength);
         out.writeVInt(maxWordLength);
         out.writeFloat(boostTerms);
+        if (out.getVersion().onOrAfter(Version.V_1_2_0)) {
+            out.writeBoolean(include);
+        }
 
         out.writeByte(searchType.id());
         if (searchQueryHint == null) {

@@ -18,8 +18,8 @@
  */
 package org.elasticsearch.action.bench;
 
+import com.google.common.collect.UnmodifiableIterator;
 import org.apache.lucene.util.PriorityQueue;
-
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionListener;
@@ -30,8 +30,6 @@ import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-
-import com.google.common.collect.UnmodifiableIterator;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -47,7 +45,8 @@ public class BenchmarkExecutor {
     private String nodeName;
     private final ClusterService clusterService;
     private volatile ImmutableOpenMap<String, BenchmarkState> activeBenchmarks = ImmutableOpenMap.of();
-    private final Object lock = new Object();
+
+    private final Object activeStateLock = new Object();
 
     public BenchmarkExecutor(Client client, ClusterService clusterService) {
         this.client = client;
@@ -67,21 +66,27 @@ public class BenchmarkExecutor {
     }
 
     /**
-     * Aborts a benchmark with the given id
+     * Aborts benchmark(s) matching the given wildcard patterns
      *
-     * @param benchmarkName The benchmark to abort
-     * @return              Abort response
+     * @param names the benchmark names to abort
      */
-    public AbortBenchmarkNodeResponse abortBenchmark(String benchmarkName) {
-
-        BenchmarkState state = activeBenchmarks.get(benchmarkName);
-        if (state == null) {
-            throw new ElasticsearchException("Benchmark [" + benchmarkName + "] not found");
+    public AbortBenchmarkResponse abortBenchmark(String[] names) {
+        synchronized (activeStateLock) {
+            for (String name : names) {
+                try {
+                    final BenchmarkState state = activeBenchmarks.get(name);
+                    if (state == null) {
+                        continue;
+                    }
+                    state.semaphore.stop();
+                    activeBenchmarks = ImmutableOpenMap.builder(activeBenchmarks).fRemove(name).build();
+                    logger.debug("Aborted benchmark [{}] on [{}]", name, nodeName());
+                } catch (Throwable e) {
+                    logger.warn("Error while aborting [{}]", name, e);
+                }
+            }
         }
-        state.semaphore.stop();
-        activeBenchmarks = ImmutableOpenMap.builder(activeBenchmarks).fRemove(benchmarkName).build();
-        logger.debug("Aborted benchmark [{}]", benchmarkName);
-        return new AbortBenchmarkNodeResponse(benchmarkName, nodeName);
+        return new AbortBenchmarkResponse(true);
     }
 
     /**
@@ -99,6 +104,8 @@ public class BenchmarkExecutor {
             BenchmarkState state = activeBenchmarks.get(id);
             response.addBenchResponse(state.response);
         }
+
+        logger.debug("Reporting [{}] active benchmarks on [{}]", response.activeBenchmarks(), nodeName());
         return response;
     }
 
@@ -115,13 +122,9 @@ public class BenchmarkExecutor {
         final Map<String, CompetitionResult> competitionResults = new HashMap<String, CompetitionResult>();
         final BenchmarkResponse benchmarkResponse = new BenchmarkResponse(request.benchmarkName(), competitionResults);
 
-        if (this.nodeName == null) {
-            this.nodeName = clusterService.localNode().name();
-        }
-
-        synchronized (lock) {
+        synchronized (activeStateLock) {
             if (activeBenchmarks.containsKey(request.benchmarkName())) {
-                throw new ElasticsearchException("Benchmark with id [" + request.benchmarkName() + "] is already running");
+                throw new ElasticsearchException("Benchmark [" + request.benchmarkName() + "] is already running on [" + nodeName() + "]");
             }
 
             activeBenchmarks = ImmutableOpenMap.builder(activeBenchmarks).fPut(
@@ -133,13 +136,14 @@ public class BenchmarkExecutor {
 
                 final BenchmarkSettings settings = competitor.settings();
                 final int iterations = settings.iterations();
-                logger.debug("Executing [{}] iterations for benchmark [{}][{}] ", iterations, request.benchmarkName(), competitor.name());
+                logger.debug("Executing [iterations: {}] [multiplier: {}] for [{}] on [{}]",
+                        iterations, settings.multiplier(), request.benchmarkName(), nodeName());
 
                 final List<CompetitionIteration> competitionIterations = new ArrayList<>(iterations);
                 final CompetitionResult competitionResult =
                         new CompetitionResult(competitor.name(), settings.concurrency(), settings.multiplier(), request.percentiles());
                 final CompetitionNodeResult competitionNodeResult =
-                        new CompetitionNodeResult(competitor.name(), nodeName, iterations, competitionIterations);
+                        new CompetitionNodeResult(competitor.name(), nodeName(), iterations, competitionIterations);
 
                 competitionResult.addCompetitionNodeResult(competitionNodeResult);
                 benchmarkResponse.competitionResults.put(competitor.name(), competitionResult);
@@ -188,8 +192,12 @@ public class BenchmarkExecutor {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             benchmarkResponse.state(BenchmarkResponse.State.ABORTED);
+        } catch (Throwable ex) {
+            logger.debug("Unexpected exception during benchmark", ex);
+            benchmarkResponse.state(BenchmarkResponse.State.FAILED);
+            benchmarkResponse.errors(ex.getMessage());
         } finally {
-            synchronized (lock) {
+            synchronized (activeStateLock) {
                 semaphore.stop();
                 activeBenchmarks = ImmutableOpenMap.builder(activeBenchmarks).fRemove(request.benchmarkName()).build();
             }
@@ -244,9 +252,6 @@ public class BenchmarkExecutor {
             throw new BenchmarkExecutionException("Too many execution failures", errorMessages);
         }
 
-        assert assertBuckets(timeBuckets); // make sure they are all set
-        assert assertBuckets(docBuckets);  // make sure they are all set
-
         final long totalTime = TimeUnit.MILLISECONDS.convert(afterRun - beforeRun, TimeUnit.NANOSECONDS);
 
         CompetitionIterationData iterationData = new CompetitionIterationData(timeBuckets);
@@ -260,7 +265,6 @@ public class BenchmarkExecutor {
 
         CompetitionIteration round =
                 new CompetitionIteration(topN, totalTime, timeBuckets.length, sumDocs, iterationData);
-
         return round;
     }
 
@@ -349,12 +353,16 @@ public class BenchmarkExecutor {
         }
 
         public void onFailure(Throwable e) {
-            manage();
-            if (errorMessages.size() < 5) {
-                logger.error("Failed to execute benchmark [{}]", e.getMessage(), e);
-                e = ExceptionsHelper.unwrapCause(e);
-                errorMessages.add(e.getLocalizedMessage());
+            try {
+                if (errorMessages.size() < 5) {
+                    logger.debug("Failed to execute benchmark [{}]", e.getMessage(), e);
+                    e = ExceptionsHelper.unwrapCause(e);
+                    errorMessages.add(e.getLocalizedMessage());
+                }
+            } finally {
+                manage(); // first add the msg then call the count down on the latch otherwise we might iss one error
             }
+
         }
     }
 
@@ -384,9 +392,13 @@ public class BenchmarkExecutor {
 
         @Override
         public void onFailure(Throwable e) {
-            timeBuckets[bucketId] = -1;
-            docBuckets[bucketId] = -1;
-            super.onFailure(e);
+            try {
+                timeBuckets[bucketId] = -1;
+                docBuckets[bucketId] = -1;
+            } finally {
+                super.onFailure(e);
+            }
+
         }
     }
 
@@ -417,6 +429,13 @@ public class BenchmarkExecutor {
         public void stop() {
             stopped = true;
         }
+    }
+
+    private String nodeName() {
+        if (nodeName == null) {
+            nodeName = clusterService.localNode().name();
+        }
+        return nodeName;
     }
 
     private final boolean assertBuckets(long[] buckets) {

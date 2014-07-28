@@ -14,11 +14,10 @@ Configuring custom postings or doc values formats is an expert feature and
 most likely using the builtin formats will suit your needs as is described
 in the <<mapping-core-types,mapping section>>.
 
-**********************************
+[WARNING]
 Only the default codec, postings format and doc values format are supported:
 other formats may break backward compatibility between minor versions of
 Elasticsearch, requiring data to be reindexed.
-**********************************
 
 
 [float]
@@ -145,21 +144,21 @@ Type name: `bloom`
 [TIP]
 ==================================================
 
-It can sometime make sense to disable bloom filters. For instance, if you are
-logging into an index per day, and you have thousands of indices, the bloom
-filters can take up a sizable amount of memory. For most queries you are only
-interested in recent indices, so you don't mind CRUD operations on older
-indices taking slightly longer.
+As of 1.4, the bloom filters are no longer loaded at search time by
+default: they consume RAM in proportion to the number of unique terms,
+which can quickly add up for certain use cases, and separate
+performance improvements have made the performance gains with bloom
+filters very small.
 
-In these cases you can disable loading of the bloom filter on  a per-index
-basis by updating the index settings:
+You can enable loading of the bloom filter at search time on a
+per-index basis by updating the index settings:
 
 [source,js]
 --------------------------------------------------
-PUT /old_index/_settings?index.codec.bloom.load=false
+PUT /old_index/_settings?index.codec.bloom.load=true
 --------------------------------------------------
 
-This setting, which defaults to `true`, can be updated on a live index. Note,
+This setting, which defaults to `false`, can be updated on a live index. Note,
 however, that changing the value will cause the index to be reopened, which
 will invalidate any existing caches.
 
@@ -260,10 +259,10 @@ Type name: `memory`
 [float]
 ==== Disk doc values format
 
-A doc values format that stores and reads everything from disk. Although it may
-be slightly slower than the default doc values format, this doc values format
-will require almost no memory from the JVM. The disk doc values format has no
-options.
+A doc values format that stores and reads everything from disk. This is
+generally not a good idea to use it as it saves very little memory compared
+to the default doc values format although it can be significantly slower.
+The disk doc values format has no options.
 
 Type name: `disk`
 

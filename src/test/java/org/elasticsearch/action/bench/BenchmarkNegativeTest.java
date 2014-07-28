@@ -25,10 +25,14 @@ import org.elasticsearch.test.ElasticsearchIntegrationTest;
 
 import org.junit.Test;
 
+import static org.hamcrest.Matchers.*;
+
+import static org.elasticsearch.test.ElasticsearchIntegrationTest.*;
+
 /**
  * Tests for negative situations where we cannot run benchmarks
  */
-@ElasticsearchIntegrationTest.ClusterScope(scope = ElasticsearchIntegrationTest.Scope.SUITE)
+@ClusterScope(scope = Scope.SUITE, enableRandomBenchNodes = false)
 public class BenchmarkNegativeTest extends ElasticsearchIntegrationTest {
 
     private static final String INDEX_NAME = "test_index";
@@ -40,12 +44,13 @@ public class BenchmarkNegativeTest extends ElasticsearchIntegrationTest {
     @Test(expected = BenchmarkNodeMissingException.class)
     public void testSubmitBenchmarkNegative() {
         client().bench(BenchmarkTestUtil.randomRequest(
-                client(), new String[] {INDEX_NAME}, cluster().size(), null)).actionGet();
+                client(), new String[] {INDEX_NAME}, internalCluster().size(), null)).actionGet();
     }
 
-    @Test(expected = BenchmarkNodeMissingException.class)
     public void testListBenchmarkNegative() {
-        client().prepareBenchStatus().execute().actionGet();
+        final BenchmarkStatusResponse response =
+                client().prepareBenchStatus().execute().actionGet();
+        assertThat(response.benchmarkResponses().size(), equalTo(0));
     }
 
     @Test(expected = BenchmarkNodeMissingException.class)

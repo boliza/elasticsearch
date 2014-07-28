@@ -19,6 +19,8 @@
 
 package org.elasticsearch;
 
+import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.test.ElasticsearchTestCase;
 import org.junit.Test;
 
@@ -94,4 +96,22 @@ public class VersionTests extends ElasticsearchTestCase {
     public void testWrongVersionFromString() {
         Version.fromString("WRONG.VERSION");
     }
+
+    public void testVersion() {
+        // test scenario
+        assertEquals(Version.CURRENT, Version.indexCreated(ImmutableSettings.builder().build()));
+        // an actual index has a IndexMetaData.SETTING_UUID
+        final Version version = randomFrom(Version.V_0_18_0, Version.V_0_90_13, Version.V_1_3_0);
+        assertEquals(version, Version.indexCreated(ImmutableSettings.builder().put(IndexMetaData.SETTING_UUID, "foo").put(IndexMetaData.SETTING_VERSION_CREATED, version).build()));
+    }
+
+    @Test
+    public void testMinCompatVersion() {
+        assertThat(Version.V_2_0_0.minimumCompatibilityVersion(), equalTo(Version.V_2_0_0));
+        assertThat(Version.V_1_3_0.minimumCompatibilityVersion(), equalTo(Version.V_1_0_0));
+        assertThat(Version.V_1_2_0.minimumCompatibilityVersion(), equalTo(Version.V_1_0_0));
+        assertThat(Version.V_1_2_3.minimumCompatibilityVersion(), equalTo(Version.V_1_0_0));
+        assertThat(Version.V_1_0_0_RC2.minimumCompatibilityVersion(), equalTo(Version.V_1_0_0_RC2));
+    }
+
 }

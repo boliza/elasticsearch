@@ -23,6 +23,7 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.search.ReduceSearchPhaseException;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.inject.Inject;
@@ -46,8 +47,8 @@ public class TransportSearchQueryAndFetchAction extends TransportSearchTypeActio
 
     @Inject
     public TransportSearchQueryAndFetchAction(Settings settings, ThreadPool threadPool, ClusterService clusterService,
-                                              SearchServiceTransportAction searchService, SearchPhaseController searchPhaseController) {
-        super(settings, threadPool, clusterService, searchService, searchPhaseController);
+                                              SearchServiceTransportAction searchService, SearchPhaseController searchPhaseController, ActionFilters actionFilters) {
+        super(settings, threadPool, clusterService, searchService, searchPhaseController, actionFilters);
     }
 
     @Override
@@ -85,7 +86,8 @@ public class TransportSearchQueryAndFetchAction extends TransportSearchTypeActio
         }
 
         private void innerFinishHim() throws IOException {
-            sortedShardList = searchPhaseController.sortDocs(request, useSlowScroll, firstResults);
+            boolean useScroll = !useSlowScroll && request.scroll() != null;
+            sortedShardList = searchPhaseController.sortDocs(useScroll, firstResults);
             final InternalSearchResponse internalResponse = searchPhaseController.merge(sortedShardList, firstResults, firstResults);
             String scrollId = null;
             if (request.scroll() != null) {

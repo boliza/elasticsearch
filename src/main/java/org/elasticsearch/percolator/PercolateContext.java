@@ -23,13 +23,12 @@ import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.search.*;
+import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.action.percolate.PercolateShardRequest;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lease.Releasables;
-import org.elasticsearch.common.lucene.HashedBytesRef;
 import org.elasticsearch.common.text.StringText;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.analysis.AnalysisService;
@@ -92,7 +91,8 @@ public class PercolateContext extends SearchContext {
     private final PageCacheRecycler pageCacheRecycler;
     private final BigArrays bigArrays;
     private final ScriptService scriptService;
-    private final ConcurrentMap<HashedBytesRef, Query> percolateQueries;
+    private final ConcurrentMap<BytesRef, Query> percolateQueries;
+    private final int numberOfShards;
     private String[] types;
 
     private Engine.Searcher docSearcher;
@@ -127,6 +127,7 @@ public class PercolateContext extends SearchContext {
         this.engineSearcher = indexShard.acquireSearcher("percolate");
         this.searcher = new ContextIndexSearcher(this, engineSearcher);
         this.scriptService = scriptService;
+        this.numberOfShards = request.getNumberOfShards();
     }
 
     public IndexSearcher docSearcher() {
@@ -160,7 +161,7 @@ public class PercolateContext extends SearchContext {
         return indexService;
     }
 
-    public ConcurrentMap<HashedBytesRef, Query> percolateQueries() {
+    public ConcurrentMap<BytesRef, Query> percolateQueries() {
         return percolateQueries;
     }
 
@@ -208,13 +209,7 @@ public class PercolateContext extends SearchContext {
 
     @Override
     protected void doClose() {
-        try (Releasable releasable = Releasables.wrap(engineSearcher, docSearcher)) {
-            if (docSearcher != null) {
-                IndexReader indexReader = docSearcher.reader();
-                fieldDataService.clear(indexReader);
-                indexService.cache().clear(indexReader);
-            }
-        }
+        Releasables.close(engineSearcher, docSearcher);
     }
 
     @Override
@@ -327,7 +322,7 @@ public class PercolateContext extends SearchContext {
 
     @Override
     public int numberOfShards() {
-        throw new UnsupportedOperationException();
+        return numberOfShards;
     }
 
     @Override
@@ -487,6 +482,16 @@ public class PercolateContext extends SearchContext {
 
     @Override
     public void timeoutInMillis(long timeoutInMillis) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public int terminateAfter() {
+        return DEFAULT_TERMINATE_AFTER;
+    }
+
+    @Override
+    public void terminateAfter(int terminateAfter) {
         throw new UnsupportedOperationException();
     }
 
