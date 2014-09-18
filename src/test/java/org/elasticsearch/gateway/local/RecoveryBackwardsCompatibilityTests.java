@@ -37,9 +37,7 @@ import org.junit.Test;
 
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.greaterThan;
-import static org.hamcrest.Matchers.lessThan;
+import static org.hamcrest.Matchers.*;
 
 @ElasticsearchIntegrationTest.ClusterScope(numDataNodes = 0, scope = ElasticsearchIntegrationTest.Scope.TEST, numClientNodes = 0, transportClientRatio = 0.0)
 public class RecoveryBackwardsCompatibilityTests extends ElasticsearchBackwardsCompatIntegrationTest {
@@ -49,8 +47,8 @@ public class RecoveryBackwardsCompatibilityTests extends ElasticsearchBackwardsC
         return ImmutableSettings.builder()
                 .put(super.nodeSettings(nodeOrdinal))
                 .put("action.admin.cluster.node.shutdown.delay", "10ms")
-                .put("gateway.recover_after_nodes", 3)
-                .put(BalancedShardsAllocator.SETTING_THRESHOLD, 1.1f).build(); // use less agressive settings
+                .put("gateway.recover_after_nodes", 2)
+                .put(BalancedShardsAllocator.SETTING_THRESHOLD, 100.0f).build(); // use less aggressive settings
     }
 
     protected int minExternalNodes() {
@@ -64,6 +62,7 @@ public class RecoveryBackwardsCompatibilityTests extends ElasticsearchBackwardsC
 
     @Test
     @LuceneTestCase.Slow
+    @TestLogging("discovery.zen:TRACE")
     public void testReusePeerRecovery() throws Exception {
         assertAcked(prepareCreate("test").setSettings(ImmutableSettings.builder().put(indexSettings()).put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 0)));
         logger.info("--> indexing docs");

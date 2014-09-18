@@ -29,7 +29,6 @@ import org.apache.lucene.util.ThreadInterruptedException;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
-import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.ShardRoutingState;
 import org.elasticsearch.common.Booleans;
@@ -49,7 +48,10 @@ import org.elasticsearch.index.aliases.IndexAliasesService;
 import org.elasticsearch.index.cache.IndexCache;
 import org.elasticsearch.index.cache.filter.FilterCacheStats;
 import org.elasticsearch.index.cache.filter.ShardFilterCache;
+import org.elasticsearch.index.cache.fixedbitset.FixedBitSetFilter;
+import org.elasticsearch.index.cache.fixedbitset.ShardFixedBitSetFilterCache;
 import org.elasticsearch.index.cache.id.IdCacheStats;
+import org.elasticsearch.index.cache.query.ShardQueryCache;
 import org.elasticsearch.index.codec.CodecService;
 import org.elasticsearch.index.deletionpolicy.SnapshotIndexCommit;
 import org.elasticsearch.index.engine.*;
@@ -121,6 +123,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
     private final ShardGetService getService;
     private final ShardIndexWarmerService shardWarmerService;
     private final ShardFilterCache shardFilterCache;
+    private final ShardQueryCache shardQueryCache;
     private final ShardFieldData shardFieldData;
     private final PercolatorQueriesRegistry percolatorQueriesRegistry;
     private final ShardPercolateService shardPercolateService;
@@ -129,6 +132,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
     private final IndexFieldDataService indexFieldDataService;
     private final IndexService indexService;
     private final ShardSuggestService shardSuggestService;
+    private final ShardFixedBitSetFilterCache shardFixedBitSetFilterCache;
 
     private final Object mutex = new Object();
     private final String checkIndexOnStartup;
@@ -153,7 +157,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
     public InternalIndexShard(ShardId shardId, @IndexSettings Settings indexSettings, IndexSettingsService indexSettingsService, IndicesLifecycle indicesLifecycle, Store store, Engine engine, MergeSchedulerProvider mergeScheduler, Translog translog,
                               ThreadPool threadPool, MapperService mapperService, IndexQueryParserService queryParserService, IndexCache indexCache, IndexAliasesService indexAliasesService, ShardIndexingService indexingService, ShardGetService getService, ShardSearchService searchService, ShardIndexWarmerService shardWarmerService,
                               ShardFilterCache shardFilterCache, ShardFieldData shardFieldData, PercolatorQueriesRegistry percolatorQueriesRegistry, ShardPercolateService shardPercolateService, CodecService codecService,
-                              ShardTermVectorService termVectorService, IndexFieldDataService indexFieldDataService, IndexService indexService, ShardSuggestService shardSuggestService) {
+                              ShardTermVectorService termVectorService, IndexFieldDataService indexFieldDataService, IndexService indexService, ShardSuggestService shardSuggestService, ShardQueryCache shardQueryCache, ShardFixedBitSetFilterCache shardFixedBitSetFilterCache) {
         super(shardId, indexSettings);
         this.indicesLifecycle = (InternalIndicesLifecycle) indicesLifecycle;
         this.indexSettingsService = indexSettingsService;
@@ -172,6 +176,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
         this.searchService = searchService;
         this.shardWarmerService = shardWarmerService;
         this.shardFilterCache = shardFilterCache;
+        this.shardQueryCache = shardQueryCache;
         this.shardFieldData = shardFieldData;
         this.percolatorQueriesRegistry = percolatorQueriesRegistry;
         this.shardPercolateService = shardPercolateService;
@@ -179,6 +184,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
         this.indexService = indexService;
         this.codecService = codecService;
         this.shardSuggestService = shardSuggestService;
+        this.shardFixedBitSetFilterCache = shardFixedBitSetFilterCache;
         state = IndexShardState.CREATED;
 
         this.refreshInterval = indexSettings.getAsTime(INDEX_REFRESH_INTERVAL, engine.defaultRefreshInterval());
@@ -227,6 +233,11 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
     }
 
     @Override
+    public ShardFixedBitSetFilterCache shardFixedBitSetFilterCache() {
+        return shardFixedBitSetFilterCache;
+    }
+
+    @Override
     public IndexFieldDataService indexFieldDataService() {
         return indexFieldDataService;
     }
@@ -254,6 +265,11 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
     @Override
     public ShardFilterCache filterCache() {
         return this.shardFilterCache;
+    }
+
+    @Override
+    public ShardQueryCache queryCache() {
+        return this.shardQueryCache;
     }
 
     @Override
@@ -450,7 +466,7 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
         query = filterQueryIfNeeded(query, types);
 
         Filter aliasFilter = indexAliasesService.aliasFilter(filteringAliases);
-        Filter parentFilter = mapperService.hasNested() ? indexCache.filter().cache(NonNestedDocsFilter.INSTANCE) : null;
+        FixedBitSetFilter parentFilter = mapperService.hasNested() ? indexCache.fixedBitSetFilterCache().getFixedBitSetFilter(NonNestedDocsFilter.INSTANCE) : null;
         return new Engine.DeleteByQuery(query, source, filteringAliases, aliasFilter, parentFilter, origin, startTime, types);
     }
 
@@ -536,7 +552,9 @@ public class InternalIndexShard extends AbstractIndexShardComponent implements I
 
     @Override
     public SegmentsStats segmentStats() {
-        return engine.segmentsStats();
+        SegmentsStats segmentsStats = engine.segmentsStats();
+        segmentsStats.addFixedBitSetMemoryInBytes(shardFixedBitSetFilterCache.getMemorySizeInBytes());
+        return segmentsStats;
     }
 
     @Override

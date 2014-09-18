@@ -26,11 +26,14 @@ import org.apache.lucene.index.*;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionFuture;
+import org.elasticsearch.action.admin.indices.alias.Alias;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.common.settings.ImmutableSettings;
+import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.mapper.core.AbstractFieldMapper;
+import org.elasticsearch.index.service.IndexService;
+import org.elasticsearch.indices.IndicesService;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -41,6 +44,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertThrows;
 import static org.hamcrest.Matchers.*;
@@ -49,7 +53,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
 
     @Test
     public void testNoSuchDoc() throws Exception {
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("field")
                             .field("type", "string")
@@ -57,23 +61,26 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
                         .endObject()
                 .endObject()
                 .endObject().endObject();
-        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        assertAcked(prepareCreate("test").addAlias(new Alias("alias")).addMapping("type1", mapping));
 
         ensureYellow();
 
         client().prepareIndex("test", "type1", "666").setSource("field", "foo bar").execute().actionGet();
         refresh();
         for (int i = 0; i < 20; i++) {
-            ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest("test", "type1", "" + i));
+            ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest(indexOrAlias(), "type1", "" + i));
             TermVectorResponse actionGet = termVector.actionGet();
             assertThat(actionGet, notNullValue());
+            assertThat(actionGet.getIndex(), equalTo("test"));
             assertThat(actionGet.isExists(), equalTo(false));
+            // check response is nevertheless serializable to json
+            actionGet.toXContent(jsonBuilder(), ToXContent.EMPTY_PARAMS);
         }
     }
 
     @Test
     public void testExistingFieldWithNoTermVectorsNoNPE() throws Exception {
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("existingfield")
                             .field("type", "string")
@@ -81,7 +88,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
                         .endObject()
                 .endObject()
                 .endObject().endObject();
-        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        assertAcked(prepareCreate("test").addAlias(new Alias("alias")).addMapping("type1", mapping));
 
         ensureYellow();
 
@@ -89,19 +96,20 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         // vectors will be null
         client().prepareIndex("test", "type1", "0").setSource("existingfield", "?").execute().actionGet();
         refresh();
-        ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest("test", "type1", "0")
+        ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest(indexOrAlias(), "type1", "0")
                 .selectedFields(new String[]{"existingfield"}));
 
         // lets see if the null term vectors are caught...
         TermVectorResponse actionGet = termVector.actionGet();
         assertThat(actionGet, notNullValue());
         assertThat(actionGet.isExists(), equalTo(true));
+        assertThat(actionGet.getIndex(), equalTo("test"));
         assertThat(actionGet.getFields().terms("existingfield"), nullValue());
     }
 
     @Test
     public void testExistingFieldButNotInDocNPE() throws Exception {
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("existingfield")
                             .field("type", "string")
@@ -109,7 +117,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
                         .endObject()
                 .endObject()
                 .endObject().endObject();
-        assertAcked(prepareCreate("test").addMapping("type1", mapping));
+        assertAcked(prepareCreate("test").addAlias(new Alias("alias")).addMapping("type1", mapping));
 
         ensureYellow();
 
@@ -117,26 +125,29 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         // vectors will be null
         client().prepareIndex("test", "type1", "0").setSource("anotherexistingfield", 1).execute().actionGet();
         refresh();
-        ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest("test", "type1", "0")
+        ActionFuture<TermVectorResponse> termVector = client().termVector(new TermVectorRequest(indexOrAlias(), "type1", "0")
                 .selectedFields(new String[]{"existingfield"}));
 
         // lets see if the null term vectors are caught...
         TermVectorResponse actionGet = termVector.actionGet();
         assertThat(actionGet, notNullValue());
         assertThat(actionGet.isExists(), equalTo(true));
+        assertThat(actionGet.getIndex(), equalTo("test"));
         assertThat(actionGet.getFields().terms("existingfield"), nullValue());
     }
 
     @Test
     public void testNotIndexedField() throws Exception {
         // must be of type string and indexed.
-        assertAcked(prepareCreate("test").addMapping("type1",
-                "field0", "type=integer,", // no tvs
-                "field1", "type=string,index=no", // no tvs
-                "field2", "type=string,index=no,store=yes",  // no tvs
-                "field3", "type=string,index=no,term_vector=yes", // no tvs
-                "field4", "type=string,index=not_analyzed", // yes tvs
-                "field5", "type=string,index=analyzed")); // yes tvs
+        assertAcked(prepareCreate("test")
+                .addAlias(new Alias("alias"))
+                .addMapping("type1",
+                        "field0", "type=integer,", // no tvs
+                        "field1", "type=string,index=no", // no tvs
+                        "field2", "type=string,index=no,store=yes",  // no tvs
+                        "field3", "type=string,index=no,term_vector=yes", // no tvs
+                        "field4", "type=string,index=not_analyzed", // yes tvs
+                        "field5", "type=string,index=analyzed")); // yes tvs
 
         ensureYellow();
 
@@ -151,25 +162,26 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         indexRandom(true, indexBuilders);
 
         for (int i = 0; i < 4; i++) {
-            TermVectorResponse resp = client().prepareTermVector("test", "type1", String.valueOf(i))
+            TermVectorResponse resp = client().prepareTermVector(indexOrAlias(), "type1", String.valueOf(i))
                     .setSelectedFields("field" + i)
                     .get();
             assertThat(resp, notNullValue());
             assertThat(resp.isExists(), equalTo(true));
+            assertThat(resp.getIndex(), equalTo("test"));
             assertThat("field" + i + " :", resp.getFields().terms("field" + i), nullValue());
         }
 
         for (int i = 4; i < 6; i++) {
-            TermVectorResponse resp = client().prepareTermVector("test", "type1", String.valueOf(i))
-                    .setSelectedFields("field" + i)
-                    .get();
+            TermVectorResponse resp = client().prepareTermVector(indexOrAlias(), "type1", String.valueOf(i))
+                    .setSelectedFields("field" + i).get();
+            assertThat(resp.getIndex(), equalTo("test"));
             assertThat("field" + i + " :", resp.getFields().terms("field" + i), notNullValue());
         }
     }
 
     @Test
     public void testSimpleTermVectors() throws ElasticsearchException, IOException {
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("field")
                             .field("type", "string")
@@ -179,6 +191,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
                 .endObject()
                 .endObject().endObject();
         assertAcked(prepareCreate("test").addMapping("type1", mapping)
+                .addAlias(new Alias("alias"))
                 .setSettings(settingsBuilder()
                         .put(indexSettings())
                         .put("index.analysis.analyzer.tv_test.tokenizer", "whitespace")
@@ -186,16 +199,17 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         ensureYellow();
         for (int i = 0; i < 10; i++) {
             client().prepareIndex("test", "type1", Integer.toString(i))
-                    .setSource(XContentFactory.jsonBuilder().startObject().field("field", "the quick brown fox jumps over the lazy dog")
+                    .setSource(jsonBuilder().startObject().field("field", "the quick brown fox jumps over the lazy dog")
                             // 0the3 4quick9 10brown15 16fox19 20jumps25 26over30
                             // 31the34 35lazy39 40dog43
                             .endObject()).execute().actionGet();
             refresh();
         }
         for (int i = 0; i < 10; i++) {
-            TermVectorRequestBuilder resp = client().prepareTermVector("test", "type1", Integer.toString(i)).setPayloads(true)
+            TermVectorRequestBuilder resp = client().prepareTermVector(indexOrAlias(), "type1", Integer.toString(i)).setPayloads(true)
                     .setOffsets(true).setPositions(true).setSelectedFields();
             TermVectorResponse response = resp.execute().actionGet();
+            assertThat(response.getIndex(), equalTo("test"));
             assertThat("doc id: " + i + " doesn't exists but should", response.isExists(), equalTo(true));
             Fields fields = response.getFields();
             assertThat(fields.size(), equalTo(1));
@@ -214,33 +228,40 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         switch (config) {
             case 0: {
                 // do nothing
+                break;
             }
             case 1: {
                 storeTermVectors = true;
+                break;
             }
             case 2: {
                 storeTermVectors = true;
                 storePositions = true;
+                break;
             }
             case 3: {
                 storeTermVectors = true;
                 storeOffsets = true;
+                break;
             }
             case 4: {
                 storeTermVectors = true;
                 storePositions = true;
                 storeOffsets = true;
+                break;
             }
             case 5: {
                 storeTermVectors = true;
                 storePositions = true;
                 storePayloads = true;
+                break;
             }
             case 6: {
                 storeTermVectors = true;
                 storePositions = true;
                 storeOffsets = true;
                 storePayloads = true;
+                break;
             }
         }
         ft.setStoreTermVectors(storeTermVectors);
@@ -249,7 +270,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         ft.setStoreTermVectorPositions(storePositions);
 
         String optionString = AbstractFieldMapper.termVectorOptionsToString(ft);
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1")
                 .startObject("properties")
                         .startObject("field")
                             .field("type", "string")
@@ -265,7 +286,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         ensureYellow();
         for (int i = 0; i < 10; i++) {
             client().prepareIndex("test", "type1", Integer.toString(i))
-                    .setSource(XContentFactory.jsonBuilder().startObject().field("field", "the quick brown fox jumps over the lazy dog")
+                    .setSource(jsonBuilder().startObject().field("field", "the quick brown fox jumps over the lazy dog")
                             // 0the3 4quick9 10brown15 16fox19 20jumps25 26over30
                             // 31the34 35lazy39 40dog43
                             .endObject()).execute().actionGet();
@@ -360,7 +381,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
     @Test
     public void testDuelESLucene() throws Exception {
         TestFieldSetting[] testFieldSettings = getFieldSettings();
-        createIndexBasedOnFieldSettings("test", testFieldSettings);
+        createIndexBasedOnFieldSettings("test", "alias", testFieldSettings);
         //we generate as many docs as many shards we have
         TestDoc[] testDocs = generateTestDocs(getNumShards("test").numPrimaries, testFieldSettings);
 
@@ -404,7 +425,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         String delimiter = createRandomDelimiter(tokens);
         String queryString = createString(tokens, payloads, encoding, delimiter.charAt(0));
         //create the mapping
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties")
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1").startObject("properties")
                 .startObject("field").field("type", "string").field("term_vector", "with_positions_offsets_payloads")
                 .field("analyzer", "payload_test").endObject().endObject().endObject().endObject();
         assertAcked(prepareCreate("test").addMapping("type1", mapping).setSettings(
@@ -418,7 +439,7 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         ensureYellow();
 
         client().prepareIndex("test", "type1", Integer.toString(1))
-                .setSource(XContentFactory.jsonBuilder().startObject().field("field", queryString).endObject()).execute().actionGet();
+                .setSource(jsonBuilder().startObject().field("field", queryString).endObject()).execute().actionGet();
         refresh();
         TermVectorRequestBuilder resp = client().prepareTermVector("test", "type1", Integer.toString(1)).setPayloads(true).setOffsets(true)
                 .setPositions(true).setSelectedFields();
@@ -560,8 +581,8 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
             fieldNames[i] = "field" + String.valueOf(i);
         }
 
-        XContentBuilder mapping = XContentFactory.jsonBuilder().startObject().startObject("type1").startObject("properties");
-        XContentBuilder source = XContentFactory.jsonBuilder().startObject();
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1").startObject("properties");
+        XContentBuilder source = jsonBuilder().startObject();
         for (String field : fieldNames) {
             mapping.startObject(field)
                     .field("type", "string")
@@ -739,5 +760,173 @@ public class GetTermVectorTests extends AbstractTermVectorTests {
         }
         assertThat(iter0.next(), nullValue());
         assertThat(iter1.next(), nullValue());
+    }
+
+    @Test
+    public void testSimpleWildCards() throws ElasticsearchException, IOException {
+        int numFields = 25;
+
+        XContentBuilder mapping = jsonBuilder().startObject().startObject("type1").startObject("properties");
+        XContentBuilder source = jsonBuilder().startObject();
+        for (int i = 0; i < numFields; i++) {
+            mapping.startObject("field" + i)
+                    .field("type", "string")
+                    .field("term_vector", randomBoolean() ? "yes" : "no")
+                    .endObject();
+            source.field("field" + i, "some text here");
+        }
+        source.endObject();
+        mapping.endObject().endObject().endObject();
+
+        assertAcked(prepareCreate("test").addAlias(new Alias("alias")).addMapping("type1", mapping));
+        ensureGreen();
+
+        client().prepareIndex("test", "type1", "0").setSource(source).get();
+        refresh();
+
+        TermVectorResponse response = client().prepareTermVector(indexOrAlias(), "type1", "0").setSelectedFields("field*").get();
+        assertThat("Doc doesn't exists but should", response.isExists(), equalTo(true));
+        assertThat(response.getIndex(), equalTo("test"));
+        assertThat("All term vectors should have been generated", response.getFields().size(), equalTo(numFields));
+    }
+
+    @Test
+    public void testArtificialVsExisting() throws ElasticsearchException, ExecutionException, InterruptedException, IOException {
+        // setup indices
+        ImmutableSettings.Builder settings = settingsBuilder()
+                .put(indexSettings())
+                .put("index.analysis.analyzer", "standard");
+        assertAcked(prepareCreate("test")
+                .setSettings(settings)
+                .addMapping("type1", "field1", "type=string,term_vector=with_positions_offsets"));
+        ensureGreen();
+
+        // index documents existing document
+        String[] content = new String[]{
+                "Generating a random permutation of a sequence (such as when shuffling cards).",
+                "Selecting a random sample of a population (important in statistical sampling).",
+                "Allocating experimental units via random assignment to a treatment or control condition.",
+                "Generating random numbers: see Random number generation."};
+
+        List<IndexRequestBuilder> indexBuilders = new ArrayList<>();
+        for (int i = 0; i < content.length; i++) {
+            indexBuilders.add(client().prepareIndex()
+                    .setIndex("test")
+                    .setType("type1")
+                    .setId(String.valueOf(i))
+                    .setSource("field1", content[i]));
+        }
+        indexRandom(true, indexBuilders);
+
+        for (int i = 0; i < content.length; i++) {
+            // request tvs from existing document
+            TermVectorResponse respExisting = client().prepareTermVector("test", "type1", String.valueOf(i))
+                    .setOffsets(true)
+                    .setPositions(true)
+                    .setFieldStatistics(true)
+                    .setTermStatistics(true)
+                    .get();
+            assertThat("doc with index: test, type1 and id: existing", respExisting.isExists(), equalTo(true));
+
+            // request tvs from artificial document
+            TermVectorResponse respArtificial = client().prepareTermVector()
+                    .setIndex("test")
+                    .setType("type1")
+                    .setRouting(String.valueOf(i)) // ensure we get the stats from the same shard as existing doc
+                    .setDoc(jsonBuilder()
+                            .startObject()
+                            .field("field1", content[i])
+                            .endObject())
+                    .setOffsets(true)
+                    .setPositions(true)
+                    .setFieldStatistics(true)
+                    .setTermStatistics(true)
+                    .get();
+            assertThat("doc with index: test, type1 and id: " + String.valueOf(i), respArtificial.isExists(), equalTo(true));
+
+            // compare existing tvs with artificial
+            compareTermVectors("field1", respExisting.getFields(), respArtificial.getFields());
+        }
+    }
+
+    @Test
+    public void testArtificialNoDoc() throws IOException {
+        // setup indices
+        ImmutableSettings.Builder settings = settingsBuilder()
+                .put(indexSettings())
+                .put("index.analysis.analyzer", "standard");
+        assertAcked(prepareCreate("test")
+                .setSettings(settings)
+                .addMapping("type1", "field1", "type=string"));
+        ensureGreen();
+
+        // request tvs from artificial document
+        String text = "the quick brown fox jumps over the lazy dog";
+        TermVectorResponse resp = client().prepareTermVector()
+                .setIndex("test")
+                .setType("type1")
+                .setDoc(jsonBuilder()
+                        .startObject()
+                        .field("field1", text)
+                        .endObject())
+                .setOffsets(true)
+                .setPositions(true)
+                .setFieldStatistics(true)
+                .setTermStatistics(true)
+                .get();
+        assertThat(resp.isExists(), equalTo(true));
+        checkBrownFoxTermVector(resp.getFields(), "field1", false);
+    }
+
+    @Test
+    public void testArtificialNonExistingField() throws Exception {
+        // setup indices
+        ImmutableSettings.Builder settings = settingsBuilder()
+                .put(indexSettings())
+                .put("index.analysis.analyzer", "standard");
+        assertAcked(prepareCreate("test")
+                .setSettings(settings)
+                .addMapping("type1", "field1", "type=string"));
+        ensureGreen();
+
+        // index just one doc
+        List<IndexRequestBuilder> indexBuilders = new ArrayList<>();
+            indexBuilders.add(client().prepareIndex()
+                    .setIndex("test")
+                    .setType("type1")
+                    .setId("1")
+                    .setRouting("1")
+                    .setSource("field1", "some text"));
+        indexRandom(true, indexBuilders);
+
+        // request tvs from artificial document
+        XContentBuilder doc = jsonBuilder()
+                .startObject()
+                    .field("field1", "the quick brown fox jumps over the lazy dog")
+                    .field("non_existing", "the quick brown fox jumps over the lazy dog")
+                .endObject();
+
+        for (int i = 0; i < 2; i++) {
+            TermVectorResponse resp = client().prepareTermVector()
+                    .setIndex("test")
+                    .setType("type1")
+                    .setDoc(doc)
+                    .setRouting("" + i)
+                    .setOffsets(true)
+                    .setPositions(true)
+                    .setFieldStatistics(true)
+                    .setTermStatistics(true)
+                    .get();
+            assertThat(resp.isExists(), equalTo(true));
+            checkBrownFoxTermVector(resp.getFields(), "field1", false);
+            // we should have created a mapping for this field
+            waitForMappingOnMaster("test", "type1", "non_existing");
+            // and return the generated term vectors
+            checkBrownFoxTermVector(resp.getFields(), "non_existing", false);
+        }
+    }
+
+    private static String indexOrAlias() {
+        return randomBoolean() ? "test" : "alias";
     }
 }

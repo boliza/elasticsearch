@@ -23,16 +23,17 @@ import com.carrotsearch.hppc.ObjectObjectOpenHashMap;
 import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import com.google.common.collect.ImmutableSortedSet;
 import org.apache.lucene.index.*;
+import org.apache.lucene.index.MultiDocValues.OrdinalMap;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LongValues;
 import org.apache.lucene.util.PagedBytes;
-import org.apache.lucene.util.packed.MonotonicAppendingLongBuffer;
 import org.apache.lucene.util.packed.PackedInts;
+import org.apache.lucene.util.packed.PackedLongValues;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
 import org.elasticsearch.common.Nullable;
-import org.elasticsearch.common.breaker.MemoryCircuitBreaker;
+import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
@@ -47,7 +48,7 @@ import org.elasticsearch.index.mapper.FieldMapper.Names;
 import org.elasticsearch.index.mapper.internal.ParentFieldMapper;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.settings.IndexSettings;
-import org.elasticsearch.indices.fielddata.breaker.CircuitBreakerService;
+import org.elasticsearch.indices.breaker.CircuitBreakerService;
 import org.elasticsearch.search.MultiValueMode;
 
 import java.io.IOException;
@@ -101,7 +102,7 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
                 new ParentChildIntersectTermsEnum(reader, UidFieldMapper.NAME, ParentFieldMapper.NAME),
                 parentTypes
         );
-        ParentChildEstimator estimator = new ParentChildEstimator(breakerService.getBreaker(), termsEnum);
+        ParentChildEstimator estimator = new ParentChildEstimator(breakerService.getBreaker(CircuitBreaker.Name.FIELDDATA), termsEnum);
         TermsEnum estimatedTermsEnum = estimator.beforeLoad(null);
         ObjectObjectOpenHashMap<String, TypeBuilder> typeBuilders = ObjectObjectOpenHashMap.newInstance();
         try {
@@ -136,7 +137,7 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
 
                     typeToAtomicFieldData.put(
                             cursor.key,
-                            new PagedBytesAtomicFieldData(bytesReader, cursor.value.termOrdToBytesOffset, ordinals)
+                            new PagedBytesAtomicFieldData(bytesReader, cursor.value.termOrdToBytesOffset.build(), ordinals)
                     );
                 }
                 data = new ParentChildAtomicFieldData(typeToAtomicFieldData.build());
@@ -183,12 +184,12 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
     class TypeBuilder {
 
         final PagedBytes bytes;
-        final MonotonicAppendingLongBuffer termOrdToBytesOffset;
+        final PackedLongValues.Builder termOrdToBytesOffset;
         final OrdinalsBuilder builder;
 
         TypeBuilder(float acceptableTransientOverheadRatio, AtomicReader reader) throws IOException {
             bytes = new PagedBytes(15);
-            termOrdToBytesOffset = new MonotonicAppendingLongBuffer();
+            termOrdToBytesOffset = PackedLongValues.monotonicBuilder(PackedInts.COMPACT);
             builder = new OrdinalsBuilder(-1, reader.maxDoc(), acceptableTransientOverheadRatio);
         }
     }
@@ -210,13 +211,13 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
      */
     public class ParentChildEstimator implements PerValueEstimator {
 
-        private final MemoryCircuitBreaker breaker;
+        private final CircuitBreaker breaker;
         private final TermsEnum filteredEnum;
 
         // The TermsEnum is passed in here instead of being generated in the
         // beforeLoad() function since it's filtered inside the previous
         // TermsEnum wrappers
-        public ParentChildEstimator(MemoryCircuitBreaker breaker, TermsEnum filteredEnum) {
+        public ParentChildEstimator(CircuitBreaker breaker, TermsEnum filteredEnum) {
             this.breaker = breaker;
             this.filteredEnum = filteredEnum;
         }
@@ -299,7 +300,7 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
         for (Map.Entry<String, SortedDocValues[]> entry : types.entrySet()) {
             final String parentType = entry.getKey();
             final SortedDocValues[] values = entry.getValue();
-            final XOrdinalMap ordinalMap = XOrdinalMap.build(null, entry.getValue(), PackedInts.DEFAULT);
+            final OrdinalMap ordinalMap = OrdinalMap.build(null, entry.getValue(), PackedInts.DEFAULT);
             ramBytesUsed += ordinalMap.ramBytesUsed();
             for (int i = 0; i < values.length; ++i) {
                 final SortedDocValues segmentValues = values[i];
@@ -337,7 +338,7 @@ public class ParentChildIndexFieldData extends AbstractIndexFieldData<AtomicPare
             }
         }
 
-        breakerService.getBreaker().addWithoutBreaking(ramBytesUsed);
+        breakerService.getBreaker(CircuitBreaker.Name.FIELDDATA).addWithoutBreaking(ramBytesUsed);
         if (logger.isDebugEnabled()) {
             logger.debug(
                     "Global-ordinals[_parent] took {}",

@@ -83,6 +83,8 @@ import org.elasticsearch.action.admin.indices.exists.types.TransportTypesExistsA
 import org.elasticsearch.action.admin.indices.exists.types.TypesExistsAction;
 import org.elasticsearch.action.admin.indices.flush.FlushAction;
 import org.elasticsearch.action.admin.indices.flush.TransportFlushAction;
+import org.elasticsearch.action.admin.indices.get.GetIndexAction;
+import org.elasticsearch.action.admin.indices.get.TransportGetIndexAction;
 import org.elasticsearch.action.admin.indices.mapping.delete.DeleteMappingAction;
 import org.elasticsearch.action.admin.indices.mapping.delete.TransportDeleteMappingAction;
 import org.elasticsearch.action.admin.indices.mapping.get.*;
@@ -126,12 +128,14 @@ import org.elasticsearch.action.count.CountAction;
 import org.elasticsearch.action.count.TransportCountAction;
 import org.elasticsearch.action.delete.DeleteAction;
 import org.elasticsearch.action.delete.TransportDeleteAction;
-import org.elasticsearch.action.delete.index.TransportIndexDeleteAction;
-import org.elasticsearch.action.delete.index.TransportShardDeleteAction;
+import org.elasticsearch.action.delete.TransportIndexDeleteAction;
+import org.elasticsearch.action.delete.TransportShardDeleteAction;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryAction;
 import org.elasticsearch.action.deletebyquery.TransportDeleteByQueryAction;
 import org.elasticsearch.action.deletebyquery.TransportIndexDeleteByQueryAction;
 import org.elasticsearch.action.deletebyquery.TransportShardDeleteByQueryAction;
+import org.elasticsearch.action.exists.ExistsAction;
+import org.elasticsearch.action.exists.TransportExistsAction;
 import org.elasticsearch.action.explain.ExplainAction;
 import org.elasticsearch.action.explain.TransportExplainAction;
 import org.elasticsearch.action.get.*;
@@ -244,6 +248,7 @@ public class ActionModule extends AbstractModule {
         registerAction(IndicesSegmentsAction.INSTANCE, TransportIndicesSegmentsAction.class);
         registerAction(CreateIndexAction.INSTANCE, TransportCreateIndexAction.class);
         registerAction(DeleteIndexAction.INSTANCE, TransportDeleteIndexAction.class);
+        registerAction(GetIndexAction.INSTANCE, TransportGetIndexAction.class);
         registerAction(OpenIndexAction.INSTANCE, TransportOpenIndexAction.class);
         registerAction(CloseIndexAction.INSTANCE, TransportCloseIndexAction.class);
         registerAction(IndicesExistsAction.INSTANCE, TransportIndicesExistsAction.class);
@@ -278,6 +283,7 @@ public class ActionModule extends AbstractModule {
         registerAction(DeleteAction.INSTANCE, TransportDeleteAction.class,
                 TransportIndexDeleteAction.class, TransportShardDeleteAction.class);
         registerAction(CountAction.INSTANCE, TransportCountAction.class);
+        registerAction(ExistsAction.INSTANCE, TransportExistsAction.class);
         registerAction(SuggestAction.INSTANCE, TransportSuggestAction.class);
         registerAction(UpdateAction.INSTANCE, TransportUpdateAction.class);
         registerAction(MultiGetAction.INSTANCE, TransportMultiGetAction.class,

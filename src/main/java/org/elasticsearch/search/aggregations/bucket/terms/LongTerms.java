@@ -95,11 +95,11 @@ public class LongTerms extends InternalTerms {
         }
     }
 
-    private @Nullable ValueFormatter formatter;
+    @Nullable ValueFormatter formatter;
 
     LongTerms() {} // for serialization
 
-    public LongTerms(String name, InternalOrder order, @Nullable ValueFormatter formatter, int requiredSize, int shardSize, long minDocCount, List<InternalTerms.Bucket> buckets, boolean showTermDocCountError, long docCountError) {
+    public LongTerms(String name, Terms.Order order, @Nullable ValueFormatter formatter, int requiredSize, int shardSize, long minDocCount, List<InternalTerms.Bucket> buckets, boolean showTermDocCountError, long docCountError) {
         super(name, order, requiredSize, shardSize, minDocCount, buckets, showTermDocCountError, docCountError);
         this.formatter = formatter;
     }
@@ -117,7 +117,7 @@ public class LongTerms extends InternalTerms {
     @Override
     public void readFrom(StreamInput in) throws IOException {
         this.name = in.readString();
-        if (in.getVersion().onOrAfter(Version.V_1_4_0)) {
+        if (in.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
             this.docCountError = in.readLong();
         } else {
             this.docCountError = -1;
@@ -125,7 +125,7 @@ public class LongTerms extends InternalTerms {
         this.order = InternalOrder.Streams.readOrder(in);
         this.formatter = ValueFormatterStreams.readOptional(in);
         this.requiredSize = readSize(in);
-        if (in.getVersion().onOrAfter(Version.V_1_4_0)) {
+        if (in.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
             this.shardSize = readSize(in);
             this.showTermDocCountError = in.readBoolean();
         } else {
@@ -139,7 +139,7 @@ public class LongTerms extends InternalTerms {
             long term = in.readLong();
             long docCount = in.readVLong();
             long bucketDocCountError = -1;
-            if (in.getVersion().onOrAfter(Version.V_1_4_0) && showTermDocCountError) {
+            if (in.getVersion().onOrAfter(Version.V_1_4_0_Beta1) && showTermDocCountError) {
                 bucketDocCountError = in.readLong();
         }
             InternalAggregations aggregations = InternalAggregations.readAggregations(in);
@@ -152,13 +152,13 @@ public class LongTerms extends InternalTerms {
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         out.writeString(name);
-        if (out.getVersion().onOrAfter(Version.V_1_4_0)) {
+        if (out.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
             out.writeLong(docCountError);
         }
         InternalOrder.Streams.writeOrder(order, out);
         ValueFormatterStreams.writeOptional(formatter, out);
         writeSize(requiredSize, out);
-        if (out.getVersion().onOrAfter(Version.V_1_4_0)) {
+        if (out.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
             writeSize(shardSize, out);
             out.writeBoolean(showTermDocCountError);
         }
@@ -167,7 +167,7 @@ public class LongTerms extends InternalTerms {
         for (InternalTerms.Bucket bucket : buckets) {
             out.writeLong(((Bucket) bucket).term);
             out.writeVLong(bucket.getDocCount());
-            if (out.getVersion().onOrAfter(Version.V_1_4_0) && showTermDocCountError) {
+            if (out.getVersion().onOrAfter(Version.V_1_4_0_Beta1) && showTermDocCountError) {
                 out.writeLong(bucket.docCountError);
             }
             ((InternalAggregations) bucket.getAggregations()).writeTo(out);
@@ -181,7 +181,7 @@ public class LongTerms extends InternalTerms {
         for (InternalTerms.Bucket bucket : buckets) {
             builder.startObject();
             builder.field(CommonFields.KEY, ((Bucket) bucket).term);
-            if (formatter != null) {
+            if (formatter != null && formatter != ValueFormatter.RAW) {
                 builder.field(CommonFields.KEY_AS_STRING, formatter.format(((Bucket) bucket).term));
             }
             builder.field(CommonFields.DOC_COUNT, bucket.getDocCount());

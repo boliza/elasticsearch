@@ -24,6 +24,8 @@ import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import com.google.common.collect.Lists;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.settings.ImmutableSettings;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.ElasticsearchIntegrationTest.ClusterScope;
 import org.elasticsearch.test.rest.client.RestException;
@@ -163,7 +165,6 @@ public class ElasticsearchRestTests extends ElasticsearchIntegrationTest {
 
         String[] specPaths = resolvePathsProperty(REST_TESTS_SPEC, DEFAULT_SPEC_PATH);
         RestSpec restSpec = RestSpec.parseFrom(DEFAULT_SPEC_PATH, specPaths);
-        assert restTestExecutionContext == null;
         restTestExecutionContext = new RestTestExecutionContext(restSpec);
     }
 
@@ -171,6 +172,13 @@ public class ElasticsearchRestTests extends ElasticsearchIntegrationTest {
     public static void close() {
         restTestExecutionContext.close();
         restTestExecutionContext = null;
+    }
+
+    /**
+     * Used to obtain settings for the REST client that is used to send REST requests.
+     */
+    protected Settings restClientSettings() {
+        return ImmutableSettings.EMPTY;
     }
 
     @Before
@@ -182,8 +190,8 @@ public class ElasticsearchRestTests extends ElasticsearchIntegrationTest {
             String testPath = testCandidate.getSuitePath() + "/" + testSection;
             assumeFalse("[" + testCandidate.getTestPath() + "] skipped, reason: blacklisted", blacklistedPathMatcher.matches(Paths.get(testPath)));
         }
-
-        restTestExecutionContext.resetClient(cluster().httpAddresses());
+        //The client needs non static info to get initialized, therefore it can't be initialized in the before class
+        restTestExecutionContext.resetClient(cluster().httpAddresses(), restClientSettings());
         restTestExecutionContext.clear();
 
         //skip test if the whole suite (yaml file) is disabled

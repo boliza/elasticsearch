@@ -19,13 +19,12 @@
 
 package org.elasticsearch.index.search.child;
 
-import org.apache.lucene.search.DocIdSetIterator;
-import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.ScoreDoc;
-import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.*;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.common.compress.CompressedString;
+import org.elasticsearch.index.cache.fixedbitset.FixedBitSetFilter;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.internal.UidFieldMapper;
 import org.elasticsearch.index.service.IndexService;
@@ -40,6 +39,7 @@ import java.io.IOException;
 import static org.hamcrest.Matchers.equalTo;
 
 @Ignore
+@LuceneTestCase.SuppressCodecs(value = {"Lucene40", "Lucene3x"})
 public abstract class AbstractChildTests extends ElasticsearchSingleNodeLuceneTestCase {
 
     static SearchContext createSearchContext(String indexName, String parentType, String childType) throws IOException {
@@ -88,4 +88,9 @@ public abstract class AbstractChildTests extends ElasticsearchSingleNodeLuceneTe
             assertThat("actualHit.score != expectedHit.score", actualHit.score, equalTo(expectedHit.score));
         }
     }
+
+    static FixedBitSetFilter wrap(Filter filter) {
+        return SearchContext.current().fixedBitSetFilterCache().getFixedBitSetFilter(filter);
+    }
+
 }

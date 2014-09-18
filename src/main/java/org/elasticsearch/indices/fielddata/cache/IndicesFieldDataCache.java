@@ -32,7 +32,10 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.index.Index;
-import org.elasticsearch.index.fielddata.*;
+import org.elasticsearch.index.fielddata.AtomicFieldData;
+import org.elasticsearch.index.fielddata.FieldDataType;
+import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.index.fielddata.IndexFieldDataCache;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.service.IndexService;
 import org.elasticsearch.index.shard.ShardId;
@@ -62,14 +65,8 @@ public class IndicesFieldDataCache extends AbstractComponent implements RemovalL
         super(settings);
         this.threadPool = threadPool;
         this.indicesFieldDataCacheListener = indicesFieldDataCacheListener;
-        String size = componentSettings.get("size", "-1");
-        long sizeInBytes = componentSettings.getAsMemory("size", "-1").bytes();
-        if (sizeInBytes > ByteSizeValue.MAX_GUAVA_CACHE_SIZE.bytes()) {
-            logger.warn("reducing requested field data cache size of [{}] to the maximum allowed size of [{}]", new ByteSizeValue(sizeInBytes),
-                    ByteSizeValue.MAX_GUAVA_CACHE_SIZE);
-            sizeInBytes = ByteSizeValue.MAX_GUAVA_CACHE_SIZE.bytes();
-            size = ByteSizeValue.MAX_GUAVA_CACHE_SIZE.toString();
-        }
+        final String size = componentSettings.get("size", "-1");
+        final long sizeInBytes = componentSettings.getAsMemory("size", "-1").bytes();
         final TimeValue expire = componentSettings.getAsTime("expire", null);
         CacheBuilder<Key, Accountable> cacheBuilder = CacheBuilder.newBuilder()
                 .removalListener(this);
@@ -108,15 +105,10 @@ public class IndicesFieldDataCache extends AbstractComponent implements RemovalL
         Key key = notification.getKey();
         assert key != null && key.listeners != null;
         IndexFieldCache indexCache = key.indexCache;
-        long sizeInBytes = key.sizeInBytes;
         final Accountable value = notification.getValue();
-        assert sizeInBytes >= 0 || value != null : "Expected size [" + sizeInBytes + "] to be positive or value [" + value + "] to be non-null";
-        if (sizeInBytes == -1 && value != null) {
-            sizeInBytes = value.ramBytesUsed();
-        }
         for (IndexFieldDataCache.Listener listener : key.listeners) {
             try {
-                listener.onUnload(indexCache.fieldNames, indexCache.fieldDataType, notification.wasEvicted(), sizeInBytes);
+                listener.onUnload(indexCache.fieldNames, indexCache.fieldDataType, notification.wasEvicted(), value.ramBytesUsed());
             } catch (Throwable e) {
                 // load anyway since listeners should not throw exceptions
                 logger.error("Failed to call listener on field data cache unloading", e);
@@ -189,7 +181,6 @@ public class IndicesFieldDataCache extends AbstractComponent implements RemovalL
                             logger.error("Failed to call listener on atomic field data loading", e);
                         }
                     }
-                    key.sizeInBytes = fieldData.ramBytesUsed();
                     return fieldData;
                 }
             });
@@ -198,7 +189,6 @@ public class IndicesFieldDataCache extends AbstractComponent implements RemovalL
 
         public <FD extends AtomicFieldData, IFD extends IndexFieldData.Global<FD>> IFD load(final IndexReader indexReader, final IFD indexFieldData) throws Exception {
             final Key key = new Key(this, indexReader.getCoreCacheKey());
-
             //noinspection unchecked
             final Accountable accountable = cache.get(key, new Callable<Accountable>() {
                 @Override
@@ -281,7 +271,6 @@ public class IndicesFieldDataCache extends AbstractComponent implements RemovalL
         public final Object readerKey;
 
         public final List<IndexFieldDataCache.Listener> listeners = new ArrayList<>();
-        long sizeInBytes = -1; // optional size in bytes (we keep it here in case the values are soft references)
 
 
         Key(IndexFieldCache indexCache, Object readerKey) {

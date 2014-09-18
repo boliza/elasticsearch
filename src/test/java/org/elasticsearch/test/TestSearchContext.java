@@ -24,12 +24,11 @@ import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.cache.docset.DocSetCache;
 import org.elasticsearch.index.cache.filter.FilterCache;
+import org.elasticsearch.index.cache.fixedbitset.FixedBitSetFilterCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.FieldMappers;
@@ -45,7 +44,6 @@ import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.aggregations.SearchContextAggregations;
 import org.elasticsearch.search.dfs.DfsSearchResult;
-import org.elasticsearch.search.facet.SearchContextFacets;
 import org.elasticsearch.search.fetch.FetchSearchResult;
 import org.elasticsearch.search.fetch.fielddata.FieldDataFieldsContext;
 import org.elasticsearch.search.fetch.partial.PartialFieldsContext;
@@ -66,36 +64,41 @@ import java.util.List;
 
 public class TestSearchContext extends SearchContext {
 
-    final CacheRecycler cacheRecycler;
     final PageCacheRecycler pageCacheRecycler;
     final BigArrays bigArrays;
     final IndexService indexService;
     final FilterCache filterCache;
     final IndexFieldDataService indexFieldDataService;
+    final FixedBitSetFilterCache fixedBitSetFilterCache;
     final ThreadPool threadPool;
 
     ContextIndexSearcher searcher;
     int size;
     private int terminateAfter = DEFAULT_TERMINATE_AFTER;
+    private String[] types;
 
-    public TestSearchContext(ThreadPool threadPool, CacheRecycler cacheRecycler, PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, IndexService indexService, FilterCache filterCache, IndexFieldDataService indexFieldDataService) {
-        this.cacheRecycler = cacheRecycler;
+    public TestSearchContext(ThreadPool threadPool,PageCacheRecycler pageCacheRecycler, BigArrays bigArrays, IndexService indexService, FilterCache filterCache, IndexFieldDataService indexFieldDataService) {
         this.pageCacheRecycler = pageCacheRecycler;
-        this.bigArrays = bigArrays;
+        this.bigArrays = bigArrays.withCircuitBreaking();
         this.indexService = indexService;
-        this.filterCache = filterCache;
-        this.indexFieldDataService = indexFieldDataService;
+        this.filterCache = indexService.cache().filter();
+        this.indexFieldDataService = indexService.fieldData();
+        this.fixedBitSetFilterCache = indexService.fixedBitSetFilterCache();
         this.threadPool = threadPool;
     }
 
     public TestSearchContext() {
-        this.cacheRecycler = null;
         this.pageCacheRecycler = null;
         this.bigArrays = null;
         this.indexService = null;
         this.filterCache = null;
         this.indexFieldDataService = null;
         this.threadPool = null;
+        this.fixedBitSetFilterCache = null;
+    }
+
+    public void setTypes(String... types) {
+        this.types = types;
     }
 
     @Override
@@ -163,7 +166,7 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public long nowInMillis() {
+    protected long nowInMillisImpl() {
         return 0;
     }
 
@@ -174,16 +177,6 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public SearchContext scroll(Scroll scroll) {
-        return null;
-    }
-
-    @Override
-    public SearchContextFacets facets() {
-        return null;
-    }
-
-    @Override
-    public SearchContext facets(SearchContextFacets facets) {
         return null;
     }
 
@@ -290,7 +283,10 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public MapperService mapperService() {
-        return indexService.mapperService();
+        if (indexService != null) {
+            return indexService.mapperService();
+        }
+        return null;
     }
 
     @Override
@@ -314,11 +310,6 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public CacheRecycler cacheRecycler() {
-        return cacheRecycler;
-    }
-
-    @Override
     public PageCacheRecycler pageCacheRecycler() {
         return pageCacheRecycler;
     }
@@ -334,8 +325,8 @@ public class TestSearchContext extends SearchContext {
     }
 
     @Override
-    public DocSetCache docSetCache() {
-        return null;
+    public FixedBitSetFilterCache fixedBitSetFilterCache() {
+        return fixedBitSetFilterCache;
     }
 
     @Override
@@ -582,6 +573,9 @@ public class TestSearchContext extends SearchContext {
 
     @Override
     public FieldMapper<?> smartNameFieldMapper(String name) {
+        if (mapperService() != null) {
+            return mapperService().smartNameFieldMapper(name, types());
+        }
         return null;
     }
 

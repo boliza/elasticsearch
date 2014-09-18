@@ -38,6 +38,10 @@ import org.elasticsearch.action.deletebyquery.DeleteByQueryAction;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequest;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryRequestBuilder;
 import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
+import org.elasticsearch.action.exists.ExistsAction;
+import org.elasticsearch.action.exists.ExistsRequest;
+import org.elasticsearch.action.exists.ExistsRequestBuilder;
+import org.elasticsearch.action.exists.ExistsResponse;
 import org.elasticsearch.action.explain.ExplainAction;
 import org.elasticsearch.action.explain.ExplainRequest;
 import org.elasticsearch.action.explain.ExplainRequestBuilder;
@@ -383,6 +387,21 @@ public abstract class AbstractClient implements Client {
     }
 
     @Override
+    public ActionFuture<ExistsResponse> exists(final ExistsRequest request) {
+        return execute(ExistsAction.INSTANCE, request);
+    }
+
+    @Override
+    public void exists(final ExistsRequest request, final ActionListener<ExistsResponse> listener) {
+        execute(ExistsAction.INSTANCE, request, listener);
+    }
+
+    @Override
+    public ExistsRequestBuilder prepareExists(String... indices) {
+        return new ExistsRequestBuilder(this).setIndices(indices);
+    }
+
+    @Override
     public ActionFuture<SuggestResponse> suggest(final SuggestRequest request) {
         return execute(SuggestAction.INSTANCE, request);
     }
@@ -420,6 +439,11 @@ public abstract class AbstractClient implements Client {
     @Override
     public void termVector(final TermVectorRequest request, final ActionListener<TermVectorResponse> listener) {
         execute(TermVectorAction.INSTANCE, request, listener);
+    }
+
+    @Override
+    public TermVectorRequestBuilder prepareTermVector() {
+        return new TermVectorRequestBuilder(this);
     }
 
     @Override

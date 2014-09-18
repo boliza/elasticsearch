@@ -26,15 +26,14 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.cache.recycler.CacheRecycler;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.index.analysis.AnalysisService;
-import org.elasticsearch.index.cache.docset.DocSetCache;
 import org.elasticsearch.index.cache.filter.FilterCache;
+import org.elasticsearch.index.cache.fixedbitset.FixedBitSetFilterCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.FieldMappers;
@@ -50,7 +49,6 @@ import org.elasticsearch.search.Scroll;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.aggregations.SearchContextAggregations;
 import org.elasticsearch.search.dfs.DfsSearchResult;
-import org.elasticsearch.search.facet.SearchContextFacets;
 import org.elasticsearch.search.fetch.FetchSearchResult;
 import org.elasticsearch.search.fetch.fielddata.FieldDataFieldsContext;
 import org.elasticsearch.search.fetch.partial.PartialFieldsContext;
@@ -66,6 +64,7 @@ import org.elasticsearch.search.suggest.SuggestionSearchContext;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  */
@@ -89,14 +88,19 @@ public abstract class SearchContext implements Releasable {
     }
 
     private Multimap<Lifetime, Releasable> clearables = null;
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     public final void close() {
-        try {
-            clearReleasables(Lifetime.CONTEXT);
-        } finally {
-            doClose();
+        if (closed.compareAndSet(false, true)) { // prevent double release
+            try {
+                clearReleasables(Lifetime.CONTEXT);
+            } finally {
+                doClose();
+            }
         }
     }
+
+    private boolean nowInMillisUsed;
 
     protected abstract void doClose();
 
@@ -129,7 +133,16 @@ public abstract class SearchContext implements Releasable {
 
     public abstract SearchContext queryBoost(float queryBoost);
 
-    public abstract long nowInMillis();
+    public final long nowInMillis() {
+        nowInMillisUsed = true;
+        return nowInMillisImpl();
+    }
+
+    public final boolean nowInMillisUsed() {
+        return nowInMillisUsed;
+    }
+
+    protected abstract long nowInMillisImpl();
 
     public abstract Scroll scroll();
 
@@ -138,10 +151,6 @@ public abstract class SearchContext implements Releasable {
     public abstract SearchContextAggregations aggregations();
 
     public abstract SearchContext aggregations(SearchContextAggregations aggregations);
-
-    public abstract SearchContextFacets facets();
-
-    public abstract SearchContext facets(SearchContextFacets facets);
 
     public abstract SearchContextHighlight highlight();
 
@@ -197,15 +206,13 @@ public abstract class SearchContext implements Releasable {
 
     public abstract ScriptService scriptService();
 
-    public abstract CacheRecycler cacheRecycler();
-
     public abstract PageCacheRecycler pageCacheRecycler();
 
     public abstract BigArrays bigArrays();
 
     public abstract FilterCache filterCache();
 
-    public abstract DocSetCache docSetCache();
+    public abstract FixedBitSetFilterCache fixedBitSetFilterCache();
 
     public abstract IndexFieldDataService fieldData();
 

@@ -43,6 +43,7 @@ import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
 import org.elasticsearch.common.compress.CompressedString;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.common.inject.Injector;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
@@ -160,8 +161,9 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
             // are going to recover them again once state persistence is disabled (no master / not recovered)
             // TODO: this feels a bit hacky here, a block disables state persistence, and then we clean the allocated shards, maybe another flag in blocks?
             if (event.state().blocks().disableStatePersistence()) {
-                for (final String index : indicesService.indices()) {
-                    IndexService indexService = indicesService.indexService(index);
+                for (Map.Entry<String, IndexService> entry : indicesService.indices().entrySet()) {
+                    String index = entry.getKey();
+                    IndexService indexService = entry.getValue();
                     for (Integer shardId : indexService.shardIds()) {
                         logger.debug("[{}][{}] removing shard (disabled block persistence)", index, shardId);
                         try {
@@ -218,10 +220,11 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
     private void applyCleanedIndices(final ClusterChangedEvent event) {
         // handle closed indices, since they are not allocated on a node once they are closed
         // so applyDeletedIndices might not take them into account
-        for (final String index : indicesService.indices()) {
+        for (Map.Entry<String, IndexService> entry : indicesService.indices().entrySet()) {
+            String index = entry.getKey();
             IndexMetaData indexMetaData = event.state().metaData().index(index);
             if (indexMetaData != null && indexMetaData.state() == IndexMetaData.State.CLOSE) {
-                IndexService indexService = indicesService.indexService(index);
+                IndexService indexService = entry.getValue();
                 for (Integer shardId : indexService.shardIds()) {
                     logger.debug("[{}][{}] removing shard (index is closed)", index, shardId);
                     try {
@@ -232,8 +235,10 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 }
             }
         }
-        for (final String index : indicesService.indices()) {
-            if (indicesService.indexService(index).shardIds().isEmpty()) {
+        for (Map.Entry<String, IndexService> entry : indicesService.indices().entrySet()) {
+            String index = entry.getKey();
+            IndexService indexService = entry.getValue();
+            if (indexService.shardIds().isEmpty()) {
                 if (logger.isDebugEnabled()) {
                     logger.debug("[{}] cleaning index (no shards allocated)", index);
                 }
@@ -244,7 +249,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
     }
 
     private void applyDeletedIndices(final ClusterChangedEvent event) {
-        for (final String index : indicesService.indices()) {
+        for (final String index : indicesService.indices().keySet()) {
             if (!event.state().metaData().hasIndex(index)) {
                 if (logger.isDebugEnabled()) {
                     logger.debug("[{}] cleaning index, no longer part of the metadata", index);
@@ -441,12 +446,12 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
         if (aliasesChanged(event)) {
             // go over and update aliases
             for (IndexMetaData indexMetaData : event.state().metaData()) {
-                if (!indicesService.hasIndex(indexMetaData.index())) {
+                String index = indexMetaData.index();
+                IndexService indexService = indicesService.indexService(index);
+                if (indexService == null) {
                     // we only create / update here
                     continue;
                 }
-                String index = indexMetaData.index();
-                IndexService indexService = indicesService.indexService(index);
                 IndexAliasesService indexAliasesService = indexService.aliasesService();
                 processAliases(index, indexMetaData.aliases().values(), indexAliasesService);
                 // go over and remove aliases
@@ -538,17 +543,19 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                 continue;
             }
 
-            if (indexService.hasShard(shardId)) {
-                InternalIndexShard indexShard = (InternalIndexShard) indexService.shard(shardId);
+            InternalIndexShard indexShard = (InternalIndexShard) indexService.shard(shardId);
+            if (indexShard != null) {
                 ShardRouting currentRoutingEntry = indexShard.routingEntry();
                 // if the current and global routing are initializing, but are still not the same, its a different "shard" being allocated
                 // for example: a shard that recovers from one node and now needs to recover to another node,
                 //              or a replica allocated and then allocating a primary because the primary failed on another node
+                boolean shardHasBeenRemoved = false;
                 if (currentRoutingEntry.initializing() && shardRouting.initializing() && !currentRoutingEntry.equals(shardRouting)) {
                     logger.debug("[{}][{}] removing shard (different instance of it allocated on this node, current [{}], global [{}])", shardRouting.index(), shardRouting.id(), currentRoutingEntry, shardRouting);
                     // cancel recovery just in case we are in recovery (its fine if we are not in recovery, it will be a noop).
                     recoveryTarget.cancelRecovery(indexShard);
                     indexService.removeShard(shardRouting.id(), "removing shard (different instance of it allocated on this node)");
+                    shardHasBeenRemoved = true;
                 } else if (isPeerRecovery(shardRouting)) {
                     // check if there is an existing recovery going, and if so, and the source node is not the same, cancel the recovery to restart it
                     RecoveryStatus recoveryStatus = recoveryTarget.recoveryStatus(indexShard);
@@ -559,16 +566,14 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
                             logger.debug("[{}][{}] removing shard (recovery source changed), current [{}], global [{}])", shardRouting.index(), shardRouting.id(), currentRoutingEntry, shardRouting);
                             recoveryTarget.cancelRecovery(indexShard);
                             indexService.removeShard(shardRouting.id(), "removing shard (recovery source node changed)");
+                            shardHasBeenRemoved = true;
                         }
                     }
                 }
-            }
-
-            if (indexService.hasShard(shardId)) {
-                InternalIndexShard indexShard = (InternalIndexShard) indexService.shard(shardId);
-                if (!shardRouting.equals(indexShard.routingEntry())) {
+                if (shardHasBeenRemoved == false && !shardRouting.equals(indexShard.routingEntry())) {
+                    // if we happen to remove the shardRouting by id above we don't need to jump in here!
                     indexShard.routingEntry(shardRouting);
-                    indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class).routingStateChanged();
+                    indexService.shardInjectorSafe(shardId).getInstance(IndexShardGatewayService.class).routingStateChanged();
                 }
             }
 
@@ -736,7 +741,7 @@ public class IndicesClusterStateService extends AbstractLifecycleComponent<Indic
             // we are the first primary, recover from the gateway
             // if its post api allocation, the index should exists
             boolean indexShouldExists = indexShardRouting.primaryAllocatedPostApi();
-            IndexShardGatewayService shardGatewayService = indexService.shardInjector(shardId).getInstance(IndexShardGatewayService.class);
+            IndexShardGatewayService shardGatewayService = indexService.shardInjectorSafe(shardId).getInstance(IndexShardGatewayService.class);
             shardGatewayService.recover(indexShouldExists, new IndexShardGatewayService.RecoveryListener() {
                 @Override
                 public void onRecoveryDone() {

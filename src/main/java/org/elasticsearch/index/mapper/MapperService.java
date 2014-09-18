@@ -24,7 +24,7 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.SimpleAnalyzerWrapper;
+import org.apache.lucene.analysis.DelegatingAnalyzerWrapper;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queries.FilterClause;
 import org.apache.lucene.queries.TermFilter;
@@ -33,6 +33,7 @@ import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.Filter;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.ElasticsearchGenerationException;
+import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.collect.Tuple;
@@ -52,6 +53,7 @@ import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.codec.docvaluesformat.DocValuesFormatService;
 import org.elasticsearch.index.codec.postingsformat.PostingsFormatService;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
+import org.elasticsearch.index.mapper.Mapper.BuilderContext;
 import org.elasticsearch.index.mapper.internal.TypeFieldMapper;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
 import org.elasticsearch.index.search.nested.NonNestedDocsFilter;
@@ -125,6 +127,8 @@ public class MapperService extends AbstractIndexComponent  {
 
     private final List<DocumentTypeListener> typeListeners = new CopyOnWriteArrayList<>();
 
+    private volatile ImmutableMap<String, FieldMapper<?>> unmappedFieldMappers = ImmutableMap.of();
+
     @Inject
     public MapperService(Index index, @IndexSettings Settings indexSettings, Environment environment, AnalysisService analysisService, IndexFieldDataService fieldDataService,
                          PostingsFormatService postingsFormatService, DocValuesFormatService docValuesFormatService, SimilarityLookupService similarityLookupService,
@@ -141,7 +145,7 @@ public class MapperService extends AbstractIndexComponent  {
         String defaultMappingLocation = componentSettings.get("default_mapping_location");
         final URL defaultMappingUrl;
         if (index.getName().equals(ScriptService.SCRIPT_INDEX)){
-            defaultMappingUrl = getMappingUrl(indexSettings, environment, defaultMappingLocation,"script-index-defaults.json","org/elasticsearch/index/mapper/script-index-defaults.json");
+            defaultMappingUrl = getMappingUrl(indexSettings, environment, defaultMappingLocation,"script-mapping.json","org/elasticsearch/index/mapper/script-mapping.json");
         } else {
             defaultMappingUrl = getMappingUrl(indexSettings, environment, defaultMappingLocation,"default-mapping.json","org/elasticsearch/index/mapper/default-mapping.json");
         }
@@ -430,13 +434,6 @@ public class MapperService extends AbstractIndexComponent  {
         }
     }
 
-    /**
-     * Just parses and returns the mapper without adding it, while still applying default mapping.
-     */
-    public DocumentMapper parse(String mappingType, CompressedString mappingSource) throws MapperParsingException {
-        return parse(mappingType, mappingSource, true);
-    }
-
     public DocumentMapper parse(String mappingType, CompressedString mappingSource, boolean applyDefault) throws MapperParsingException {
         String defaultMappingSource;
         if (PercolatorService.TYPE_NAME.equals(mappingType)) {
@@ -516,10 +513,12 @@ public class MapperService extends AbstractIndexComponent  {
         // since they have different types (starting with __)
         if (types.length == 1) {
             DocumentMapper docMapper = documentMapper(types[0]);
-            if (docMapper == null) {
-                return new TermFilter(new Term(types[0]));
+            Filter filter = docMapper != null ? docMapper.typeFilter() : new TermFilter(new Term(types[0]));
+            if (hasNested) {
+                return new AndFilter(ImmutableList.of(filter, NonNestedDocsFilter.INSTANCE));
+            } else {
+                return filter;
             }
-            return docMapper.typeFilter();
         }
         // see if we can use terms filter
         boolean useTermsFilter = true;
@@ -535,6 +534,7 @@ public class MapperService extends AbstractIndexComponent  {
             }
         }
 
+        // We only use terms filter is there is a type filter, this means we don't need to check for hasNested here
         if (useTermsFilter) {
             BytesRef[] typesBytes = new BytesRef[types.length];
             for (int i = 0; i < typesBytes.length; i++) {
@@ -559,6 +559,9 @@ public class MapperService extends AbstractIndexComponent  {
             }
             if (filterPercolateType) {
                 bool.add(excludePercolatorType, BooleanClause.Occur.MUST);
+            }
+            if (hasNested) {
+                bool.add(NonNestedDocsFilter.INSTANCE, BooleanClause.Occur.MUST);
             }
 
             return bool;
@@ -863,6 +866,32 @@ public class MapperService extends AbstractIndexComponent  {
         return null;
     }
 
+    /**
+     * Given a type (eg. long, string, ...), return an anonymous field mapper that can be used for search operations.
+     */
+    public FieldMapper<?> unmappedFieldMapper(String type) {
+        final ImmutableMap<String, FieldMapper<?>> unmappedFieldMappers = this.unmappedFieldMappers;
+        FieldMapper<?> mapper = unmappedFieldMappers.get(type);
+        if (mapper == null) {
+            final Mapper.TypeParser.ParserContext parserContext = documentMapperParser().parserContext();
+            Mapper.TypeParser typeParser = parserContext.typeParser(type);
+            if (typeParser == null) {
+                throw new ElasticsearchIllegalArgumentException("No mapper found for type [" + type + "]");
+            }
+            final Mapper.Builder<?, ?> builder = typeParser.parse("__anonymous_" + type, ImmutableMap.<String, Object>of(), parserContext);
+            final BuilderContext builderContext = new BuilderContext(indexSettings, new ContentPath(1));
+            mapper = (FieldMapper<?>) builder.build(builderContext);
+
+            // There is no need to synchronize writes here. In the case of concurrent access, we could just
+            // compute some mappers several times, which is not a big deal
+            this.unmappedFieldMappers = ImmutableMap.<String, FieldMapper<?>>builder()
+                    .putAll(unmappedFieldMappers)
+                    .put(type, mapper)
+                    .build();
+        }
+        return mapper;
+    }
+
     public Analyzer searchAnalyzer() {
         return this.searchAnalyzer;
     }
@@ -1035,11 +1064,12 @@ public class MapperService extends AbstractIndexComponent  {
         }
     }
 
-    final class SmartIndexNameSearchAnalyzer extends SimpleAnalyzerWrapper {
+    final class SmartIndexNameSearchAnalyzer extends DelegatingAnalyzerWrapper {
 
         private final Analyzer defaultAnalyzer;
 
         SmartIndexNameSearchAnalyzer(Analyzer defaultAnalyzer) {
+            super(Analyzer.PER_FIELD_REUSE_STRATEGY);
             this.defaultAnalyzer = defaultAnalyzer;
         }
 
@@ -1066,11 +1096,12 @@ public class MapperService extends AbstractIndexComponent  {
         }
     }
 
-    final class SmartIndexNameSearchQuoteAnalyzer extends SimpleAnalyzerWrapper {
+    final class SmartIndexNameSearchQuoteAnalyzer extends DelegatingAnalyzerWrapper {
 
         private final Analyzer defaultAnalyzer;
 
         SmartIndexNameSearchQuoteAnalyzer(Analyzer defaultAnalyzer) {
+            super(Analyzer.PER_FIELD_REUSE_STRATEGY);
             this.defaultAnalyzer = defaultAnalyzer;
         }
 

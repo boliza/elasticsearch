@@ -22,6 +22,7 @@ package org.elasticsearch.action.termvector;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchParseException;
 import org.elasticsearch.action.*;
+import org.elasticsearch.action.get.MultiGetRequest;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -52,6 +53,11 @@ public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsReque
         return this;
     }
 
+    public MultiTermVectorsRequest add(MultiGetRequest.Item item) {
+        requests.add(new TermVectorRequest(item));
+        return this;
+    }
+
     @Override
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
@@ -75,9 +81,7 @@ public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsReque
         return requests;
     }
 
-    public void add(TermVectorRequest template, BytesReference data)
-            throws Exception {
-
+    public void add(TermVectorRequest template, BytesReference data) throws Exception {
         XContentParser.Token token;
         String currentFieldName = null;
         if (data.length() > 0) {
@@ -86,7 +90,6 @@ public class MultiTermVectorsRequest extends ActionRequest<MultiTermVectorsReque
                     if (token == XContentParser.Token.FIELD_NAME) {
                         currentFieldName = parser.currentName();
                     } else if (token == XContentParser.Token.START_ARRAY) {
-
                         if ("docs".equals(currentFieldName)) {
                             while ((token = parser.nextToken()) != XContentParser.Token.END_ARRAY) {
                                 if (token != XContentParser.Token.START_OBJECT) {

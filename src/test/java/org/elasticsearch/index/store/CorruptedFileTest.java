@@ -18,6 +18,7 @@
  */
 package org.elasticsearch.index.store;
 
+import com.carrotsearch.ant.tasks.junit4.dependencies.com.google.common.collect.Lists;
 import com.carrotsearch.randomizedtesting.LifecycleScope;
 import com.carrotsearch.randomizedtesting.generators.RandomPicks;
 import com.google.common.base.Charsets;
@@ -264,7 +265,7 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
         assertThat(response.getStatus(), is(ClusterHealthStatus.RED));
         ClusterState state = client().admin().cluster().prepareState().get().getState();
         GroupShardsIterator shardIterators = state.getRoutingNodes().getRoutingTable().activePrimaryShardsGrouped(new String[] {"test"}, false);
-        for (ShardIterator iterator : shardIterators.iterators()) {
+        for (ShardIterator iterator : shardIterators) {
             ShardRouting routing;
             while ((routing = iterator.nextOrNull()) != null) {
                 if (routing.getId() == shardRouting.getId()) {
@@ -422,28 +423,17 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
                         .put("chunk_size", randomIntBetween(100, 1000))));
         logger.info("--> snapshot");
         CreateSnapshotResponse createSnapshotResponse = client().admin().cluster().prepareCreateSnapshot("test-repo", "test-snap").setWaitForCompletion(true).setIndices("test").get();
-        if (createSnapshotResponse.getSnapshotInfo().state() == SnapshotState.PARTIAL) {
-            logger.info("failed during snapshot -- maybe SI file got corrupted");
-            final List<File> files = listShardFiles(shardRouting);
-            File corruptedFile = null;
-            for (File file : files) {
-                if (file.getName().startsWith("corrupted_")) {
-                    corruptedFile = file;
-                    break;
-                }
+        assertThat(createSnapshotResponse.getSnapshotInfo().state(), equalTo(SnapshotState.PARTIAL));
+        logger.info("failed during snapshot -- maybe SI file got corrupted");
+        final List<File> files = listShardFiles(shardRouting);
+        File corruptedFile = null;
+        for (File file : files) {
+            if (file.getName().startsWith("corrupted_")) {
+                corruptedFile = file;
+                break;
             }
-            assertThat(corruptedFile, notNullValue());
-        } else {
-            assertThat(""+createSnapshotResponse.getSnapshotInfo().state(), createSnapshotResponse.getSnapshotInfo().successfulShards(), greaterThan(0));
-            assertThat(""+createSnapshotResponse.getSnapshotInfo().state(), createSnapshotResponse.getSnapshotInfo().successfulShards(), equalTo(createSnapshotResponse.getSnapshotInfo().totalShards()));
-
-            assertThat(client().admin().cluster().prepareGetSnapshots("test-repo").setSnapshots("test-snap").get().getSnapshots().get(0).state(), equalTo(SnapshotState.SUCCESS));
-
-            cluster().wipeIndices("test");
-            RestoreSnapshotResponse restoreSnapshotResponse = client().admin().cluster().prepareRestoreSnapshot("test-repo", "test-snap").setWaitForCompletion(true).execute().actionGet();
-            assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(), greaterThan(0));
-            assertThat(restoreSnapshotResponse.getRestoreInfo().successfulShards(), equalTo(restoreSnapshotResponse.getRestoreInfo().totalShards()-1));
         }
+        assertThat(corruptedFile, notNullValue());
     }
 
     private int numShards(String... index) {
@@ -457,10 +447,11 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
         return corruptRandomFile(true);
     }
 
-    private ShardRouting corruptRandomFile(final boolean includeSegmentsFiles) throws IOException {
+    private ShardRouting corruptRandomFile(final boolean includePerCommitFiles) throws IOException {
         ClusterState state = client().admin().cluster().prepareState().get().getState();
         GroupShardsIterator shardIterators = state.getRoutingNodes().getRoutingTable().activePrimaryShardsGrouped(new String[]{"test"}, false);
-        ShardIterator shardIterator = RandomPicks.randomFrom(getRandom(), shardIterators.iterators());
+        List<ShardIterator>  iterators = Lists.newArrayList(shardIterators);
+        ShardIterator shardIterator = RandomPicks.randomFrom(getRandom(), iterators);
         ShardRouting shardRouting = shardIterator.nextOrNull();
         assertNotNull(shardRouting);
         assertTrue(shardRouting.primary());
@@ -475,8 +466,10 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
             files.addAll(Arrays.asList(file.listFiles(new FileFilter() {
                 @Override
                 public boolean accept(File pathname) {
-                    return pathname.isFile() && !"write.lock".equals(pathname.getName()) &&
-                            (includeSegmentsFiles == true || pathname.getName().startsWith("segments") == false);
+                    if (pathname.isFile() && "write.lock".equals(pathname.getName()) == false) {
+                        return (includePerCommitFiles || isPerSegmentFile(pathname.getName()));
+                    }
+                    return false; // no dirs no write.locks
                 }
             })));
         }
@@ -521,6 +514,15 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
         }
         assertThat("no file corrupted", fileToCorrupt, notNullValue());
         return shardRouting;
+    }
+
+    private static final boolean isPerCommitFile(String fileName) {
+        // .del and segments_N are per commit files and might change after corruption
+        return fileName.startsWith("segments") || fileName.endsWith(".del");
+    }
+
+    private static final boolean isPerSegmentFile(String fileName) {
+        return isPerCommitFile(fileName) == false;
     }
 
     /**
@@ -586,7 +588,7 @@ public class CorruptedFileTest extends ElasticsearchIntegrationTest {
         }
 
         @Override
-        public MergePolicy newMergePolicy() {
+        public MergePolicy getMergePolicy() {
             return NoMergePolicy.INSTANCE;
         }
 

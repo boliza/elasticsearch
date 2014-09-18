@@ -40,6 +40,7 @@ import org.elasticsearch.index.shard.service.InternalIndexShard;
 import org.elasticsearch.index.store.support.AbstractIndexStore;
 import org.elasticsearch.index.translog.TranslogService;
 import org.elasticsearch.index.translog.fs.FsTranslog;
+import org.elasticsearch.indices.cache.query.IndicesQueryCache;
 import org.elasticsearch.indices.ttl.IndicesTTLService;
 import org.elasticsearch.indices.warmer.InternalIndicesWarmer;
 
@@ -88,6 +89,7 @@ public class IndexDynamicSettingsModule extends AbstractModule {
         indexDynamicSettings.addDynamicSetting(InternalEngine.INDEX_CODEC);
         indexDynamicSettings.addDynamicSetting(InternalEngine.INDEX_FAIL_ON_MERGE_FAILURE);
         indexDynamicSettings.addDynamicSetting(InternalEngine.INDEX_FAIL_ON_CORRUPTION);
+        indexDynamicSettings.addDynamicSetting(InternalEngine.INDEX_CHECKSUM_ON_MERGE, Validator.BOOLEAN);
         indexDynamicSettings.addDynamicSetting(ShardSlowLogIndexingService.INDEX_INDEXING_SLOWLOG_THRESHOLD_INDEX_WARN, Validator.TIME);
         indexDynamicSettings.addDynamicSetting(ShardSlowLogIndexingService.INDEX_INDEXING_SLOWLOG_THRESHOLD_INDEX_INFO, Validator.TIME);
         indexDynamicSettings.addDynamicSetting(ShardSlowLogIndexingService.INDEX_INDEXING_SLOWLOG_THRESHOLD_INDEX_DEBUG, Validator.TIME);
@@ -119,6 +121,7 @@ public class IndexDynamicSettingsModule extends AbstractModule {
         indexDynamicSettings.addDynamicSetting(TranslogService.INDEX_TRANSLOG_FLUSH_THRESHOLD_PERIOD, Validator.TIME);
         indexDynamicSettings.addDynamicSetting(TranslogService.INDEX_TRANSLOG_DISABLE_FLUSH);
         indexDynamicSettings.addDynamicSetting(InternalIndicesWarmer.INDEX_WARMER_ENABLED);
+        indexDynamicSettings.addDynamicSetting(IndicesQueryCache.INDEX_CACHE_QUERY_ENABLED, Validator.BOOLEAN);
     }
 
     public void addDynamicSettings(String... settings) {

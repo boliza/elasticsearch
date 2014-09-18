@@ -69,9 +69,7 @@ public class GeoDistanceParser implements Aggregator.Parser {
     @Override
     public AggregatorFactory parse(String aggregationName, XContentParser parser, SearchContext context) throws IOException {
 
-        ValuesSourceParser<ValuesSource.GeoPoint> vsParser = ValuesSourceParser.geoPoint(aggregationName, InternalGeoDistance.TYPE, context)
-                .requiresSortedValues(true)
-                .build();
+        ValuesSourceParser<ValuesSource.GeoPoint> vsParser = ValuesSourceParser.geoPoint(aggregationName, InternalGeoDistance.TYPE, context).build();
 
         GeoPointParser geoPointParser = new GeoPointParser(aggregationName, InternalGeoDistance.TYPE, context, ORIGIN_FIELD);
 
@@ -209,7 +207,7 @@ public class GeoDistanceParser implements Aggregator.Parser {
             public void setNextReader(AtomicReaderContext reader) {
                 final MultiGeoPointValues geoValues = source.geoPointValues();
                 final FixedSourceDistance distance = distanceType.fixedSourceDistance(origin.getLat(), origin.getLon(), unit);
-                distanceValues = GeoDistance.distanceValues(distance, geoValues);
+                distanceValues = GeoDistance.distanceValues(geoValues, distance);
             }
 
             @Override

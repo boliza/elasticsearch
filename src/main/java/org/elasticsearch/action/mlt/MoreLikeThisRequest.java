@@ -80,7 +80,6 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> impl
     private SearchType searchType = SearchType.DEFAULT;
     private int searchSize = 0;
     private int searchFrom = 0;
-    private String searchQueryHint;
     private String[] searchIndices;
     private String[] searchTypes;
     private Scroll searchScroll;
@@ -137,13 +136,19 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> impl
                 return MoreLikeThisRequest.this.indicesOptions();
             }
         });
-        requests.add(new IndicesRequest() {
+        requests.add(new IndicesRequest.Replaceable() {
             @Override
             public String[] indices() {
                 if (searchIndices != null) {
                     return searchIndices;
                 }
                 return new String[]{index};
+            }
+
+            @Override
+            public IndicesRequest indices(String[] indices) {
+                searchIndices = indices;
+                return this;
             }
 
             @Override
@@ -507,21 +512,6 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> impl
     }
 
     /**
-     * Optional search query hint.
-     */
-    public MoreLikeThisRequest searchQueryHint(String searchQueryHint) {
-        this.searchQueryHint = searchQueryHint;
-        return this;
-    }
-
-    /**
-     * Optional search query hint.
-     */
-    public String searchQueryHint() {
-        return this.searchQueryHint;
-    }
-
-    /**
      * An optional search scroll request to be able to continue and scroll the search
      * operation.
      */
@@ -616,8 +606,11 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> impl
         }
 
         searchType = SearchType.fromId(in.readByte());
-        if (in.readBoolean()) {
-            searchQueryHint = in.readString();
+        if (in.getVersion().before(Version.V_1_4_0_Beta1)) {
+            //searchQueryHint was unused and removed in 1.4
+            if (in.readBoolean()) {
+                in.readString();
+            }
         }
         size = in.readVInt();
         if (size == 0) {
@@ -689,11 +682,9 @@ public class MoreLikeThisRequest extends ActionRequest<MoreLikeThisRequest> impl
         }
 
         out.writeByte(searchType.id());
-        if (searchQueryHint == null) {
+        if (out.getVersion().before(Version.V_1_4_0_Beta1)) {
+            //searchQueryHint was unused and removed in 1.4
             out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            out.writeString(searchQueryHint);
         }
         if (searchIndices == null) {
             out.writeVInt(0);

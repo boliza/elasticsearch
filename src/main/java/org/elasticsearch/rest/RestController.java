@@ -19,6 +19,7 @@
 
 package org.elasticsearch.rest;
 
+import com.google.common.collect.ImmutableSet;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.ElasticsearchIllegalStateException;
@@ -33,10 +34,9 @@ import org.elasticsearch.rest.support.RestUtils;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.elasticsearch.rest.RestStatus.BAD_REQUEST;
-import static org.elasticsearch.rest.RestStatus.OK;
-import static org.elasticsearch.rest.RestStatus.FORBIDDEN;
+import static org.elasticsearch.rest.RestStatus.*;
 
 /**
  *
@@ -44,6 +44,7 @@ import static org.elasticsearch.rest.RestStatus.FORBIDDEN;
 public class RestController extends AbstractLifecycleComponent<RestController> {
 
     public static final String HTTP_JSON_ENABLE = "http.jsonp.enable";
+    private ImmutableSet<String> relevantHeaders = ImmutableSet.of();
 
     private final PathTrie<RestHandler> getHandlers = new PathTrie<>(RestUtils.REST_DECODER);
     private final PathTrie<RestHandler> postHandlers = new PathTrie<>(RestUtils.REST_DECODER);
@@ -78,6 +79,25 @@ public class RestController extends AbstractLifecycleComponent<RestController> {
     }
 
     /**
+     * Controls which REST headers get copied over from a {@link org.elasticsearch.rest.RestRequest} to
+     * its corresponding {@link org.elasticsearch.transport.TransportRequest}(s).
+     *
+     * By default no headers get copied but it is possible to extend this behaviour via plugins by calling this method.
+     */
+    public synchronized void registerRelevantHeaders(String... headers) {
+        relevantHeaders = new ImmutableSet.Builder<String>().addAll(relevantHeaders).add(headers).build();
+    }
+
+    /**
+     * Returns the REST headers that get copied over from a {@link org.elasticsearch.rest.RestRequest} to
+     * its corresponding {@link org.elasticsearch.transport.TransportRequest}(s).
+     * By default no headers get copied but it is possible to extend this behaviour via plugins by calling {@link #registerRelevantHeaders(String...)}.
+     */
+    public ImmutableSet<String> relevantHeaders() {
+        return relevantHeaders;
+    }
+
+    /**
      * Registers a pre processor to be executed before the rest request is actually handled.
      */
     public synchronized void registerFilter(RestFilter preProcessor) {
@@ -87,7 +107,7 @@ public class RestController extends AbstractLifecycleComponent<RestController> {
         Arrays.sort(copy, new Comparator<RestFilter>() {
             @Override
             public int compare(RestFilter o1, RestFilter o2) {
-                return o2.order() - o1.order();
+                return Integer.compare(o1.order(), o2.order());
             }
         });
         filters = copy;
@@ -216,7 +236,7 @@ public class RestController extends AbstractLifecycleComponent<RestController> {
 
         private final RestFilter executionFilter;
 
-        private volatile int index;
+        private final AtomicInteger index = new AtomicInteger();
 
         ControllerFilterChain(RestFilter executionFilter) {
             this.executionFilter = executionFilter;
@@ -225,8 +245,7 @@ public class RestController extends AbstractLifecycleComponent<RestController> {
         @Override
         public void continueProcessing(RestRequest request, RestChannel channel) {
             try {
-                int loc = index;
-                index++;
+                int loc = index.getAndIncrement();
                 if (loc > filters.length) {
                     throw new ElasticsearchIllegalStateException("filter continueProcessing was called more than expected");
                 } else if (loc == filters.length) {

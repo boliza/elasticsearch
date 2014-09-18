@@ -306,7 +306,45 @@ Per default, the assumption is that the documents in the bucket are also contain
 "background_is_superset": false
 --------------------------------------------------
 
- 
+
+===== Chi square
+coming[1.4.0]
+
+Chi square as described in "Information Retrieval", Manning et al., Chapter 13.5.2 can be used as significance score by adding the parameter
+	
+[source,js]
+--------------------------------------------------
+
+	 "chi_square": {
+	 }
+--------------------------------------------------
+
+Chi square behaves like mutual information and can be configured with the same parameters `include_negatives` and `background_is_superset`.
+
+
+===== google normalized distance
+coming[1.4.0]
+
+Google normalized distance  as described in "The Google Similarity Distance", Cilibrasi and Vitanyi, 2007 (http://arxiv.org/pdf/cs/0412098v3.pdf) can be used as significance score by adding the parameter
+	
+[source,js]
+--------------------------------------------------
+
+	 "gnd": {
+	 }
+--------------------------------------------------
+
+`gnd` also accepts the `background_is_superset` parameter. 
+
+===== Which one is best?
+
+
+Roughly, `mutual_information` prefers high frequent terms even if they occur also frequently in the background. For example, in an analysis of natural language text this might lead to selection of stop words. `mutual_information` is unlikely to select very rare terms like misspellings. `gnd` prefers terms with a high co-occurence and avoids selection of stopwords. It might be better suited for synonym detection. However, `gnd` has a tendency to select very rare terms that are, for example, a result of misspelling. `chi_square` and `jlh` are somewhat in-between.
+
+It is hard to say which one of the different heuristics will be the best choice as it depends on what the significant terms are used for (see for example [Yang and Pedersen, "A Comparative Study on Feature Selection in Text Categorization", 1997](http://courses.ischool.berkeley.edu/i256/f06/papers/yang97comparative.pdf) for a study on using significant terms for feature selection for text classification).
+
+
+
 	
 ===== Size & Shard Size
 
@@ -411,66 +449,9 @@ WARNING: Use of background filters will slow the query as each term's postings m
 ===== Filtering Values
 
 It is possible (although rarely required) to filter the values for which buckets will be created. This can be done using the `include` and
-`exclude` parameters which are based on regular expressions. This functionality mirrors the features
-offered by the `terms` aggregation.
+`exclude` parameters which are based on a regular expression string or arrays of exact terms. This functionality mirrors the features
+described in the <<search-aggregations-bucket-terms-aggregation,terms aggregation>> documentation.
 
-
-[source,js]
---------------------------------------------------
-{
-    "aggs" : {
-        "tags" : {
-            "significant_terms" : {
-                "field" : "tags",
-                "include" : ".*sport.*",
-                "exclude" : "water_.*"
-            }
-        }
-    }
-}
---------------------------------------------------
-
-In the above example, buckets will be created for all the tags that has the word `sport` in them, except those starting
-with `water_` (so the tag `water_sports` will no be aggregated). The `include` regular expression will determine what
-values are "allowed" to be aggregated, while the `exclude` determines the values that should not be aggregated. When
-both are defined, the `exclude` has precedence, meaning, the `include` is evaluated first and only then the `exclude`.
-
-The regular expression are based on the Java(TM) http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html[Pattern],
-and as such, they it is also possible to pass in flags that will determine how the compiled regular expression will work:
-
-[source,js]
---------------------------------------------------
-{
-    "aggs" : {
-        "tags" : {
-             "terms" : {
-                 "field" : "tags",
-                 "include" : {
-                     "pattern" : ".*sport.*",
-                     "flags" : "CANON_EQ|CASE_INSENSITIVE" <1>
-                 },
-                 "exclude" : {
-                     "pattern" : "water_.*",
-                     "flags" : "CANON_EQ|CASE_INSENSITIVE"
-                 }
-             }
-         }
-    }
-}
---------------------------------------------------
-
-<1> the flags are concatenated using the `|` character as a separator
-
-The possible flags that can be used are:
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#CANON_EQ[`CANON_EQ`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#CASE_INSENSITIVE[`CASE_INSENSITIVE`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#COMMENTS[`COMMENTS`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#DOTALL[`DOTALL`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#LITERAL[`LITERAL`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#MULTILINE[`MULTILINE`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#UNICODE_CASE[`UNICODE_CASE`],
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#UNICODE_CHARACTER_CLASS[`UNICODE_CHARACTER_CLASS`] and
-http://docs.oracle.com/javase/7/docs/api/java/util/regex/Pattern.html#UNIX_LINES[`UNIX_LINES`]
 
 ===== Execution hint
 

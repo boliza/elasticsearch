@@ -20,11 +20,12 @@ package org.elasticsearch.index.fielddata.plain;
 
 import org.apache.lucene.index.*;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.IntsRef;
+import org.apache.lucene.util.IntsRefBuilder;
 import org.apache.lucene.util.fst.FST;
 import org.apache.lucene.util.fst.FST.INPUT_TYPE;
 import org.apache.lucene.util.fst.PositiveIntOutputs;
 import org.apache.lucene.util.fst.Util;
+import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.fielddata.*;
@@ -33,7 +34,7 @@ import org.elasticsearch.index.fielddata.ordinals.OrdinalsBuilder;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.settings.IndexSettings;
-import org.elasticsearch.indices.fielddata.breaker.CircuitBreakerService;
+import org.elasticsearch.indices.breaker.CircuitBreakerService;
 
 /**
  */
@@ -63,7 +64,7 @@ public class FSTBytesIndexFieldData extends AbstractIndexOrdinalsFieldData {
         Terms terms = reader.terms(getFieldNames().indexName());
         AtomicOrdinalsFieldData data = null;
         // TODO: Use an actual estimator to estimate before loading.
-        NonEstimatingEstimator estimator = new NonEstimatingEstimator(breakerService.getBreaker());
+        NonEstimatingEstimator estimator = new NonEstimatingEstimator(breakerService.getBreaker(CircuitBreaker.Name.FIELDDATA));
         if (terms == null) {
             data = AbstractAtomicOrdinalsFieldData.empty();
             estimator.afterLoad(null, data.ramBytesUsed());
@@ -71,7 +72,7 @@ public class FSTBytesIndexFieldData extends AbstractIndexOrdinalsFieldData {
         }
         PositiveIntOutputs outputs = PositiveIntOutputs.getSingleton();
         org.apache.lucene.util.fst.Builder<Long> fstBuilder = new org.apache.lucene.util.fst.Builder<>(INPUT_TYPE.BYTE1, outputs);
-        final IntsRef scratch = new IntsRef();
+        final IntsRefBuilder scratch = new IntsRefBuilder();
 
         final long numTerms;
         if (regex == null && frequency == null) {

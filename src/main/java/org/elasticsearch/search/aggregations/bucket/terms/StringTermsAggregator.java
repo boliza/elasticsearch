@@ -20,6 +20,7 @@ package org.elasticsearch.search.aggregations.bucket.terms;
 
 import org.apache.lucene.index.AtomicReaderContext;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.BytesRefBuilder;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.util.BytesRefHash;
 import org.elasticsearch.index.fielddata.SortedBinaryDocValues;
@@ -44,17 +45,17 @@ public class StringTermsAggregator extends AbstractStringTermsAggregator {
     protected final BytesRefHash bucketOrds;
     private final IncludeExclude includeExclude;
     private SortedBinaryDocValues values;
-    private final BytesRef previous;
+    private final BytesRefBuilder previous;
 
     public StringTermsAggregator(String name, AggregatorFactories factories, ValuesSource valuesSource, long estimatedBucketCount,
-                                 InternalOrder order, BucketCountThresholds bucketCountThresholds,
+            Terms.Order order, BucketCountThresholds bucketCountThresholds,
                                  IncludeExclude includeExclude, AggregationContext aggregationContext, Aggregator parent, SubAggCollectionMode collectionMode, boolean showTermDocCountError) {
 
         super(name, factories, estimatedBucketCount, aggregationContext, parent, order, bucketCountThresholds, collectionMode, showTermDocCountError);
         this.valuesSource = valuesSource;
         this.includeExclude = includeExclude;
         bucketOrds = new BytesRefHash(estimatedBucketCount, aggregationContext.bigArrays());
-        previous = new BytesRef();
+        previous = new BytesRefBuilder();
     }
 
     @Override
@@ -74,13 +75,13 @@ public class StringTermsAggregator extends AbstractStringTermsAggregator {
         final int valuesCount = values.count();
 
         // SortedBinaryDocValues don't guarantee uniqueness so we need to take care of dups
-        previous.length = 0;
+        previous.clear();
         for (int i = 0; i < valuesCount; ++i) {
             final BytesRef bytes = values.valueAt(i);
             if (includeExclude != null && !includeExclude.accept(bytes)) {
                 continue;
             }
-            if (previous.equals(bytes)) {
+            if (previous.get().equals(bytes)) {
                 continue;
             }
             long bucketOrdinal = bucketOrds.add(bytes);

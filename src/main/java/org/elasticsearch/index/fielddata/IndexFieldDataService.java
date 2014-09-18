@@ -26,7 +26,6 @@ import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.common.util.concurrent.KeyedLock;
@@ -38,11 +37,8 @@ import org.elasticsearch.index.mapper.internal.IndexFieldMapper;
 import org.elasticsearch.index.mapper.internal.ParentFieldMapper;
 import org.elasticsearch.index.service.IndexService;
 import org.elasticsearch.index.settings.IndexSettings;
-import org.elasticsearch.indices.fielddata.breaker.CircuitBreakerService;
-import org.elasticsearch.indices.fielddata.breaker.NoneCircuitBreakerService;
+import org.elasticsearch.indices.breaker.CircuitBreakerService;
 import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
-import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCacheListener;
-import org.elasticsearch.threadpool.ThreadPool;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -53,6 +49,9 @@ import java.util.concurrent.ConcurrentMap;
 /**
  */
 public class IndexFieldDataService extends AbstractIndexComponent {
+
+    public static final String FIELDDATA_CACHE_KEY = "index.fielddata.cache";
+    public static final String FIELDDATA_CACHE_VALUE_NODE = "node";
 
     private static final String DISABLED_FORMAT = "disabled";
     private static final String DOC_VALUES_FORMAT = "doc_values";
@@ -65,7 +64,6 @@ public class IndexFieldDataService extends AbstractIndexComponent {
     private final static ImmutableMap<String, IndexFieldData.Builder> docValuesBuildersByType;
     private final static ImmutableMap<Tuple<String, String>, IndexFieldData.Builder> buildersByTypeAndFormat;
     private final CircuitBreakerService circuitBreakerService;
-    private final IndicesFieldDataCacheListener indicesFieldDataCacheListener;
 
     static {
         buildersByType = MapBuilder.<String, IndexFieldData.Builder>newMapBuilder()
@@ -142,25 +140,12 @@ public class IndexFieldDataService extends AbstractIndexComponent {
 
     IndexService indexService;
 
-    // public for testing
-    public IndexFieldDataService(Index index, CircuitBreakerService circuitBreakerService) {
-        this(index, ImmutableSettings.Builder.EMPTY_SETTINGS,
-                new IndicesFieldDataCache(ImmutableSettings.Builder.EMPTY_SETTINGS, new IndicesFieldDataCacheListener(circuitBreakerService), new ThreadPool("testing-only")),
-                circuitBreakerService, new IndicesFieldDataCacheListener(circuitBreakerService));
-    }
-
-    // public for testing
-    public IndexFieldDataService(Index index, CircuitBreakerService circuitBreakerService, IndicesFieldDataCache indicesFieldDataCache) {
-        this(index, ImmutableSettings.Builder.EMPTY_SETTINGS, indicesFieldDataCache, circuitBreakerService, new IndicesFieldDataCacheListener(circuitBreakerService));
-    }
-
     @Inject
     public IndexFieldDataService(Index index, @IndexSettings Settings indexSettings, IndicesFieldDataCache indicesFieldDataCache,
-                                 CircuitBreakerService circuitBreakerService, IndicesFieldDataCacheListener indicesFieldDataCacheListener) {
+                                 CircuitBreakerService circuitBreakerService) {
         super(index, indexSettings);
         this.indicesFieldDataCache = indicesFieldDataCache;
         this.circuitBreakerService = circuitBreakerService;
-        this.indicesFieldDataCacheListener = indicesFieldDataCacheListener;
     }
 
     // we need to "inject" the index service to not create cyclic dep
@@ -274,12 +259,8 @@ public class IndexFieldDataService extends AbstractIndexComponent {
                     if (cache == null) {
                         //  we default to node level cache, which in turn defaults to be unbounded
                         // this means changing the node level settings is simple, just set the bounds there
-                        String cacheType = type.getSettings().get("cache", indexSettings.get("index.fielddata.cache", "node"));
-                        if ("resident".equals(cacheType)) {
-                            cache = new IndexFieldDataCache.Resident(logger, indexService, fieldNames, type, indicesFieldDataCacheListener);
-                        } else if ("soft".equals(cacheType)) {
-                            cache = new IndexFieldDataCache.Soft(logger, indexService, fieldNames, type, indicesFieldDataCacheListener);
-                        } else if ("node".equals(cacheType)) {
+                        String cacheType = type.getSettings().get("cache", indexSettings.get(FIELDDATA_CACHE_KEY, FIELDDATA_CACHE_VALUE_NODE));
+                        if (FIELDDATA_CACHE_VALUE_NODE.equals(cacheType)) {
                             cache = indicesFieldDataCache.buildIndexFieldDataCache(indexService, index, fieldNames, type);
                         } else if ("none".equals(cacheType)){
                             cache = new IndexFieldDataCache.None();
@@ -297,42 +278,6 @@ public class IndexFieldDataService extends AbstractIndexComponent {
             }
         }
         return (IFD) fieldData;
-    }
-
-    public <IFD extends IndexFieldData<?>> IFD getForFieldDirect(FieldMapper<?> mapper) {
-        final FieldMapper.Names fieldNames = mapper.names();
-        final FieldDataType type = mapper.fieldDataType();
-        if (type == null) {
-            throw new ElasticsearchIllegalArgumentException("found no fielddata type for field [" + fieldNames.fullName() + "]");
-        }
-        final boolean docValues = mapper.hasDocValues();
-
-        IndexFieldData.Builder builder = null;
-        String format = type.getFormat(indexSettings);
-        if (format != null && FieldDataType.DOC_VALUES_FORMAT_VALUE.equals(format) && !docValues) {
-            logger.warn("field [" + fieldNames.fullName() + "] has no doc values, will use default field data format");
-            format = null;
-        }
-        if (format != null) {
-            builder = buildersByTypeAndFormat.get(Tuple.tuple(type.getType(), format));
-            if (builder == null) {
-                logger.warn("failed to find format [" + format + "] for field [" + fieldNames.fullName() + "], will use default");
-            }
-        }
-        if (builder == null && docValues) {
-            builder = docValuesBuildersByType.get(type.getType());
-        }
-        if (builder == null) {
-            builder = buildersByType.get(type.getType());
-        }
-        if (builder == null) {
-            throw new ElasticsearchIllegalArgumentException("failed to find field data builder for field " + fieldNames.fullName() + ", and type " + type.getType());
-        }
-
-        CircuitBreakerService circuitBreakerService = new NoneCircuitBreakerService();
-        @SuppressWarnings("unchecked")
-        IFD ifd = (IFD) builder.build(index, indexSettings, mapper, new IndexFieldDataCache.None(), circuitBreakerService, indexService.mapperService());
-        return ifd;
     }
 
 }

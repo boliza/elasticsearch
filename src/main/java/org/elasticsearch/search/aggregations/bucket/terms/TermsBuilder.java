@@ -19,6 +19,7 @@
 
 package org.elasticsearch.search.aggregations.bucket.terms;
 
+import org.elasticsearch.ElasticsearchIllegalArgumentException;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.Aggregator.SubAggCollectionMode;
@@ -28,7 +29,7 @@ import java.io.IOException;
 import java.util.Locale;
 
 /**
- * Builds a {@code terms} aggregation
+ * Builder for the {@link Terms} aggregation.
  */
 public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
 
@@ -43,7 +44,12 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
     private String executionHint;
     private SubAggCollectionMode collectionMode;
     private Boolean showTermDocCountError;
+    private String[] includeTerms = null;
+    private String[] excludeTerms = null;
 
+    /**
+     * Sole constructor.
+     */
     public TermsBuilder(String name) {
         super(name, "terms");
     }
@@ -98,10 +104,24 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
      * @see java.util.regex.Pattern#compile(String, int)
      */
     public TermsBuilder include(String regex, int flags) {
+        if (includeTerms != null) {
+            throw new ElasticsearchIllegalArgumentException("exclude clause must be an array of strings or a regex, not both");
+        }
         this.includePattern = regex;
         this.includeFlags = flags;
         return this;
     }
+    
+    /**
+     * Define a set of terms that should be aggregated.
+     */
+    public TermsBuilder include(String [] terms) {
+        if (includePattern != null) {
+            throw new ElasticsearchIllegalArgumentException("include clause must be an array of strings or a regex, not both");
+        }
+        this.includeTerms = terms;
+        return this;
+    }    
 
     /**
      * Define a regular expression that will filter out terms that should be excluded from the aggregation. The regular
@@ -120,10 +140,25 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
      * @see java.util.regex.Pattern#compile(String, int)
      */
     public TermsBuilder exclude(String regex, int flags) {
+        if (excludeTerms != null) {
+            throw new ElasticsearchIllegalArgumentException("exclude clause must be an array of strings or a regex, not both");
+        }
         this.excludePattern = regex;
         this.excludeFlags = flags;
         return this;
     }
+    
+    /**
+     * Define a set of terms that should not be aggregated.
+     */
+    public TermsBuilder exclude(String [] terms) {
+        if (excludePattern != null) {
+            throw new ElasticsearchIllegalArgumentException("exclude clause must be an array of strings or a regex, not both");
+        }
+        this.excludeTerms = terms;
+        return this;
+    }    
+    
 
     /**
      * When using scripts, the value type indicates the types of the values the script is generating.
@@ -141,16 +176,25 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
         return this;
     }
 
+    /**
+     * Expert: provide an execution hint to the aggregation.
+     */
     public TermsBuilder executionHint(String executionHint) {
         this.executionHint = executionHint;
         return this;
     }
-    
+
+    /**
+     * Expert: set the collection mode.
+     */
     public TermsBuilder collectMode(SubAggCollectionMode mode) {
         this.collectionMode = mode;
         return this;
     }
-    
+
+    /**
+     * Expert: return document count errors per term in the response.
+     */
     public TermsBuilder showTermDocCountError(boolean showTermDocCountError) {
         this.showTermDocCountError = showTermDocCountError;
         return this;
@@ -177,6 +221,9 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
         if (collectionMode != null) {
             builder.field(Aggregator.COLLECT_MODE.getPreferredName(), collectionMode.parseField().getPreferredName());
         }
+        if (includeTerms != null) {
+            builder.array("include", includeTerms);
+        }
         if (includePattern != null) {
             if (includeFlags == 0) {
                 builder.field("include", includePattern);
@@ -186,6 +233,9 @@ public class TermsBuilder extends ValuesSourceAggregationBuilder<TermsBuilder> {
                         .field("flags", includeFlags)
                         .endObject();
             }
+        }
+        if (excludeTerms != null) {
+            builder.array("exclude", excludeTerms);
         }
         if (excludePattern != null) {
             if (excludeFlags == 0) {

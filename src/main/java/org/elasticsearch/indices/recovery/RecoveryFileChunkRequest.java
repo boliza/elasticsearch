@@ -21,10 +21,10 @@ package org.elasticsearch.indices.recovery;
 
 import org.apache.lucene.util.Version;
 import org.elasticsearch.common.Nullable;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.store.StoreFileMetaData;
 import org.elasticsearch.transport.TransportRequest;
@@ -101,7 +101,7 @@ public final class RecoveryFileChunkRequest extends TransportRequest {  // publi
         Version writtenBy = null;
         if (in.getVersion().onOrAfter(org.elasticsearch.Version.V_1_3_0)) {
             String versionString = in.readOptionalString();
-            writtenBy = versionString == null ? null : Version.parseLeniently(versionString);
+            writtenBy = Lucene.parseVersionLenient(versionString, null);
         }
         metaData = new StoreFileMetaData(name, length, checksum, writtenBy);
     }
@@ -117,7 +117,7 @@ public final class RecoveryFileChunkRequest extends TransportRequest {  // publi
         out.writeOptionalString(metaData.checksum());
         out.writeBytesReference(content);
         if (out.getVersion().onOrAfter(org.elasticsearch.Version.V_1_3_0)) {
-            out.writeOptionalString(metaData.writtenBy() == null ? null : metaData.writtenBy().name());
+            out.writeOptionalString(metaData.writtenBy() == null ? null : metaData.writtenBy().toString());
         }
     }
 

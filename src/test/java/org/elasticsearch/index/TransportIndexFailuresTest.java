@@ -22,6 +22,7 @@ package org.elasticsearch.index;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthStatus;
+import org.elasticsearch.action.index.IndexAction;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.routing.IndexShardRoutingTable;
@@ -32,6 +33,7 @@ import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.DiscoverySettings;
+import org.elasticsearch.discovery.zen.fd.FaultDetection;
 import org.elasticsearch.test.ElasticsearchIntegrationTest;
 import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.elasticsearch.test.transport.MockTransportService;
@@ -53,8 +55,8 @@ public class TransportIndexFailuresTest extends ElasticsearchIntegrationTest {
 
     private static final Settings nodeSettings = ImmutableSettings.settingsBuilder()
             .put("discovery.type", "zen") // <-- To override the local setting if set externally
-            .put("discovery.zen.fd.ping_timeout", "1s") // <-- for hitting simulated network failures quickly
-            .put("discovery.zen.fd.ping_retries", "1") // <-- for hitting simulated network failures quickly
+            .put(FaultDetection.SETTING_PING_TIMEOUT, "1s") // <-- for hitting simulated network failures quickly
+            .put(FaultDetection.SETTING_PING_RETRIES, "1") // <-- for hitting simulated network failures quickly
             .put(DiscoverySettings.PUBLISH_TIMEOUT, "1s") // <-- for hitting simulated network failures quickly
             .put("discovery.zen.minimum_master_nodes", 1)
             .put(TransportModule.TRANSPORT_SERVICE_TYPE_KEY, MockTransportService.class.getName())
@@ -112,12 +114,12 @@ public class TransportIndexFailuresTest extends ElasticsearchIntegrationTest {
         TransportService mockTransportService = internalCluster().getInstance(TransportService.class, primaryNode);
         ((MockTransportService) mockTransportService).addFailToSendNoConnectRule(
                 internalCluster().getInstance(Discovery.class, replicaNode).localNode(),
-                ImmutableSet.of("index/replica")
+                ImmutableSet.of(IndexAction.NAME + "[r]")
         );
         mockTransportService = internalCluster().getInstance(TransportService.class, replicaNode);
         ((MockTransportService) mockTransportService).addFailToSendNoConnectRule(
                 internalCluster().getInstance(Discovery.class, primaryNode).localNode(),
-                ImmutableSet.of("index/replica")
+                ImmutableSet.of(IndexAction.NAME + "[r]")
         );
 
         logger.info("--> indexing into primary");

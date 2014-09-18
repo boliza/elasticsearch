@@ -21,6 +21,7 @@ package org.elasticsearch.search.internal;
 
 import org.elasticsearch.Version;
 import org.elasticsearch.action.IndicesRequest;
+import org.elasticsearch.action.OriginalIndices;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.action.search.type.ParsedScrollId;
@@ -48,9 +49,9 @@ import static org.elasticsearch.search.Scroll.readScroll;
  *  sort : { "name.first" : {}, "name.last" : { reverse : true } }
  *  fields : [ "name.first", "name.last" ]
  *  query : { ... }
- *  facets : {
- *      "facet1" : {
- *          query : { ... }
+ *  aggs : {
+ *      "agg1" : {
+ *          terms : { ... }
  *      }
  *  }
  * }
@@ -78,12 +79,20 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
     private String templateName;
     private ScriptService.ScriptType templateType;
     private Map<String, String> templateParams;
+    private Boolean queryCache;
 
     private long nowInMillis;
 
     private boolean useSlowScroll;
 
+    private OriginalIndices originalIndices;
+
     public ShardSearchRequest() {
+
+    }
+
+    public ShardSearchRequest(TransportRequest request) {
+        super(request);
     }
 
     public ShardSearchRequest(SearchRequest searchRequest, ShardRouting shardRouting, int numberOfShards, boolean useSlowScroll) {
@@ -101,10 +110,8 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
         this.scroll = searchRequest.scroll();
         this.types = searchRequest.types();
         this.useSlowScroll = useSlowScroll;
-    }
-
-    public ShardSearchRequest(ShardRouting shardRouting, int numberOfShards, SearchType searchType) {
-        this(shardRouting.index(), shardRouting.id(), numberOfShards, searchType);
+        this.queryCache = searchRequest.queryCache();
+        this.originalIndices = new OriginalIndices(searchRequest);
     }
 
     public ShardSearchRequest(String index, int shardId, int numberOfShards, SearchType searchType) {
@@ -112,6 +119,7 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
         this.shardId = shardId;
         this.numberOfShards = numberOfShards;
         this.searchType = searchType;
+        this.originalIndices = OriginalIndices.EMPTY;
     }
 
     public String index() {
@@ -120,12 +128,12 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
 
     @Override
     public String[] indices() {
-        return new String[]{index};
+        return originalIndices.indices();
     }
 
     @Override
     public IndicesOptions indicesOptions() {
-        return IndicesOptions.strictSingleIndexNoExpandForbidClosed();
+        return originalIndices.indicesOptions();
     }
 
     public int shardId() {
@@ -221,6 +229,15 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
         return useSlowScroll;
     }
 
+    public Boolean queryCache() {
+        return this.queryCache;
+    }
+
+    public ShardSearchRequest queryCache(Boolean queryCache) {
+        this.queryCache = queryCache;
+        return this;
+    }
+
     @Override
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
@@ -255,15 +272,26 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
             // This means that this request was send from a 1.0.x or 1.1.x node and we need to fallback to slow scroll.
             useSlowScroll = in.getVersion().before(ParsedScrollId.SCROLL_SEARCH_AFTER_MINIMUM_VERSION);
         }
+
+        if (in.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
+            queryCache = in.readOptionalBoolean();
+        }
+        originalIndices = OriginalIndices.readOptionalOriginalIndices(in);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
+        writeTo(out, false);
+    }
+
+    public void writeTo(StreamOutput out, boolean asKey) throws IOException {
         super.writeTo(out);
         out.writeString(index);
         out.writeVInt(shardId);
         out.writeByte(searchType.id());
-        out.writeVInt(numberOfShards);
+        if (!asKey) {
+            out.writeVInt(numberOfShards);
+        }
         if (scroll == null) {
             out.writeBoolean(false);
         } else {
@@ -274,7 +302,9 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
         out.writeBytesReference(extraSource);
         out.writeStringArray(types);
         out.writeStringArrayNullable(filteringAliases);
-        out.writeVLong(nowInMillis);
+        if (!asKey) {
+            out.writeVLong(nowInMillis);
+        }
 
         if (out.getVersion().onOrAfter(Version.V_1_1_0)) {
             out.writeBytesReference(templateSource);
@@ -291,5 +321,10 @@ public class ShardSearchRequest extends TransportRequest implements IndicesReque
         if (out.getVersion().onOrAfter(ParsedScrollId.SCROLL_SEARCH_AFTER_MINIMUM_VERSION)) {
             out.writeBoolean(useSlowScroll);
         }
+
+        if (out.getVersion().onOrAfter(Version.V_1_4_0_Beta1)) {
+            out.writeOptionalBoolean(queryCache);
+        }
+        OriginalIndices.writeOptionalOriginalIndices(originalIndices, out);
     }
 }

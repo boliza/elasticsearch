@@ -81,7 +81,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         AllocationService strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -166,7 +166,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -197,7 +197,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -272,7 +272,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         AllocationService strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -307,6 +307,8 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
             nodeWithPrimary = "node2";
             nodeWithoutPrimary = "node1";
         }
+        logger.info("--> nodeWithPrimary: {}", nodeWithPrimary);
+        logger.info("--> nodeWithoutPrimary: {}", nodeWithoutPrimary);
 
         // Make node without the primary now habitable to replicas
         usages.put(nodeWithoutPrimary, new DiskUsage(nodeWithoutPrimary, 100, 35)); // 65% used
@@ -320,7 +322,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
         };
         strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -387,7 +389,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -418,7 +420,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -521,7 +523,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         AllocationService strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 
@@ -583,7 +585,7 @@ public class DiskThresholdDeciderTests extends ElasticsearchAllocationTestCase {
 
         AllocationService strategy = new AllocationService(settingsBuilder()
                 .put("cluster.routing.allocation.concurrent_recoveries", 10)
-                .put("cluster.routing.allocation.allow_rebalance", "always")
+                .put(ClusterRebalanceAllocationDecider.CLUSTER_ROUTING_ALLOCATION_ALLOW_REBALANCE, "always")
                 .put("cluster.routing.allocation.cluster_concurrent_rebalance", -1)
                 .build(), deciders, new ShardsAllocators(), cis);
 

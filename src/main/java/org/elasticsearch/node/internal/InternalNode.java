@@ -19,16 +19,11 @@
 
 package org.elasticsearch.node.internal;
 
-import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.Build;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionModule;
 import org.elasticsearch.action.bench.BenchmarkModule;
-import org.elasticsearch.bulk.udp.BulkUdpModule;
-import org.elasticsearch.bulk.udp.BulkUdpService;
-import org.elasticsearch.cache.recycler.CacheRecycler;
-import org.elasticsearch.cache.recycler.CacheRecyclerModule;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.cache.recycler.PageCacheRecyclerModule;
 import org.elasticsearch.client.Client;
@@ -39,7 +34,6 @@ import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
 import org.elasticsearch.cluster.routing.RoutingService;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
-import org.elasticsearch.cluster.service.InternalClusterService;
 import org.elasticsearch.common.StopWatch;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.component.Lifecycle;
@@ -49,7 +43,6 @@ import org.elasticsearch.common.inject.Injector;
 import org.elasticsearch.common.inject.Injectors;
 import org.elasticsearch.common.inject.ModulesBuilder;
 import org.elasticsearch.common.io.CachedStreams;
-import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
@@ -72,6 +65,7 @@ import org.elasticsearch.http.HttpServerModule;
 import org.elasticsearch.index.search.shape.ShapeModule;
 import org.elasticsearch.indices.IndicesModule;
 import org.elasticsearch.indices.IndicesService;
+import org.elasticsearch.indices.breaker.CircuitBreakerModule;
 import org.elasticsearch.indices.cache.filter.IndicesFilterCache;
 import org.elasticsearch.indices.cluster.IndicesClusterStateService;
 import org.elasticsearch.indices.fielddata.cache.IndicesFieldDataCache;
@@ -107,28 +101,31 @@ import org.elasticsearch.watcher.ResourceWatcherService;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
 
+import static org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder;
+
 /**
  *
  */
 public final class InternalNode implements Node {
 
+    private static final String CLIENT_TYPE = "node";
+    public static final String HTTP_ENABLED = "http.enabled";
+
+
     private final Lifecycle lifecycle = new Lifecycle();
-
     private final Injector injector;
-
     private final Settings settings;
-
     private final Environment environment;
-
     private final PluginsService pluginsService;
-
     private final Client client;
 
     public InternalNode() throws ElasticsearchException {
         this(ImmutableSettings.Builder.EMPTY_SETTINGS, true);
     }
 
-    public InternalNode(Settings pSettings, boolean loadConfigSettings) throws ElasticsearchException {
+    public InternalNode(Settings preparedSettings, boolean loadConfigSettings) throws ElasticsearchException {
+        final Settings pSettings = settingsBuilder().put(preparedSettings)
+                .put(Client.CLIENT_TYPE_SETTING, CLIENT_TYPE).build();
         Tuple<Settings, Environment> tuple = InternalSettingsPreparer.prepareSettings(pSettings, loadConfigSettings);
         tuple = new Tuple<>(TribeService.processSettings(tuple.v1()), tuple.v2());
 
@@ -160,8 +157,8 @@ public final class InternalNode implements Node {
         try {
             ModulesBuilder modules = new ModulesBuilder();
             modules.add(new Version.Module(version));
-            modules.add(new CacheRecyclerModule(settings));
             modules.add(new PageCacheRecyclerModule(settings));
+            modules.add(new CircuitBreakerModule(settings));
             modules.add(new BigArraysModule(settings));
             modules.add(new PluginsModule(settings, pluginsService));
             modules.add(new SettingsModule(settings));
@@ -176,7 +173,7 @@ public final class InternalNode implements Node {
             modules.add(new ClusterModule(settings));
             modules.add(new RestModule(settings));
             modules.add(new TransportModule(settings));
-            if (settings.getAsBoolean("http.enabled", true)) {
+            if (settings.getAsBoolean(HTTP_ENABLED, true)) {
                 modules.add(new HttpServerModule(settings));
             }
             modules.add(new RiversModule(settings));
@@ -186,7 +183,6 @@ public final class InternalNode implements Node {
             modules.add(new MonitorModule(settings));
             modules.add(new GatewayModule(settings));
             modules.add(new NodeClientModule());
-            modules.add(new BulkUdpModule());
             modules.add(new ShapeModule());
             modules.add(new PercolatorModule());
             modules.add(new ResourceWatcherModule());
@@ -254,7 +250,6 @@ public final class InternalNode implements Node {
         if (settings.getAsBoolean("http.enabled", true)) {
             injector.getInstance(HttpServer.class).start();
         }
-        injector.getInstance(BulkUdpService.class).start();
         injector.getInstance(ResourceWatcherService.class).start();
         injector.getInstance(TribeService.class).start();
 
@@ -272,7 +267,6 @@ public final class InternalNode implements Node {
         logger.info("stopping ...");
 
         injector.getInstance(TribeService.class).stop();
-        injector.getInstance(BulkUdpService.class).stop();
         injector.getInstance(ResourceWatcherService.class).stop();
         if (settings.getAsBoolean("http.enabled", true)) {
             injector.getInstance(HttpServer.class).stop();
@@ -326,8 +320,6 @@ public final class InternalNode implements Node {
         StopWatch stopWatch = new StopWatch("node_close");
         stopWatch.start("tribe");
         injector.getInstance(TribeService.class).close();
-        stopWatch.stop().start("bulk.udp");
-        injector.getInstance(BulkUdpService.class).close();
         stopWatch.stop().start("http");
         if (settings.getAsBoolean("http.enabled", true)) {
             injector.getInstance(HttpServer.class).close();
@@ -395,7 +387,6 @@ public final class InternalNode implements Node {
         }
 
         injector.getInstance(NodeEnvironment.class).close();
-        injector.getInstance(CacheRecycler.class).close();
         injector.getInstance(PageCacheRecycler.class).close();
         Injectors.close(injector);
 
