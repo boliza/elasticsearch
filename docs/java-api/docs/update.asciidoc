@@ -98,8 +98,8 @@ If the document `index/type/1` already exists, we will have after this operation
 [source,js]
 --------------------------------------------------
 {
-    "name"  : "Joe Dalton",
-    "gender": "male"        <1>
+    "name"  : "Joe Dalton", <1>
+    "gender": "male"        
 }
 --------------------------------------------------
 <1> This field is added by the update request
